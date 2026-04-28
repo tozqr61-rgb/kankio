@@ -1,0 +1,62 @@
+# Maintainer: Kankio <dev@kank.com.tr>
+# Arch Linux PKGBUILD for Kankio Desktop
+
+pkgname=kankio-desktop
+pkgver=1.1.0
+pkgrel=1
+pkgdesc="Kankio — Sesli Sohbet & Senkronize Müzik Masaüstü İstemcisi"
+arch=('x86_64')
+url="https://kank.com.tr"
+license=('custom')
+depends=(
+    'webkit2gtk-4.1'
+    'gtk3'
+    'libayatana-appindicator'
+    'openssl'
+    'gst-plugins-base'
+    'gst-plugins-good'
+)
+makedepends=(
+    'rust'
+    'cargo'
+    'nodejs'
+    'npm'
+    'pkgconf'
+)
+source=()
+
+build() {
+    cd "$srcdir/.."
+    cargo tauri build --bundles none
+}
+
+package() {
+    cd "$srcdir/.."
+
+    # Binary
+    install -Dm755 "src-tauri/target/release/kankio-desktop" \
+        "$pkgdir/usr/bin/kankio"
+
+    # Desktop entry
+    install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/kankio.desktop" << 'EOF'
+[Desktop Entry]
+Name=Kankio
+Comment=Sesli Sohbet & Senkronize Müzik
+Exec=kankio
+Icon=kankio
+Type=Application
+Categories=Network;Chat;AudioVideo;
+StartupWMClass=Kankio
+Keywords=chat;music;voice;sohbet;müzik;
+EOF
+
+    # Icons
+    install -Dm644 "src-tauri/icons/32x32.png" \
+        "$pkgdir/usr/share/icons/hicolor/32x32/apps/kankio.png"
+    install -Dm644 "src-tauri/icons/64x64.png" \
+        "$pkgdir/usr/share/icons/hicolor/64x64/apps/kankio.png"
+    install -Dm644 "src-tauri/icons/128x128.png" \
+        "$pkgdir/usr/share/icons/hicolor/128x128/apps/kankio.png"
+    install -Dm644 "src-tauri/icons/128x128@2x.png" \
+        "$pkgdir/usr/share/icons/hicolor/256x256/apps/kankio.png"
+}

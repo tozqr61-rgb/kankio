@@ -1,0 +1,79 @@
+# ─────────────────────────────────────────────────────────────────
+# Kankio — Nginx Konfigürasyonu
+# Dosya yolu: /etc/nginx/sites-available/kankio
+#
+# Kurulum:
+#   cp nginx.conf.example /etc/nginx/sites-available/kankio
+#   ln -s /etc/nginx/sites-available/kankio /etc/nginx/sites-enabled/
+#   certbot --nginx -d kank.com.tr -d www.kank.com.tr
+#   nginx -t && systemctl reload nginx
+# ─────────────────────────────────────────────────────────────────
+
+# HTTP → HTTPS yönlendirme
+server {
+    listen 80;
+    listen [::]:80;
+    server_name kank.com.tr www.kank.com.tr;
+    return 301 https://kank.com.tr$request_uri;
+}
+
+# Ana sunucu (HTTPS)
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name kank.com.tr www.kank.com.tr;
+
+    root /var/www/kankio/public;
+    index index.php;
+
+    # SSL — certbot tarafından otomatik doldurulur
+    # ssl_certificate     /etc/letsencrypt/live/kank.com.tr/fullchain.pem;
+    # ssl_certificate_key /etc/letsencrypt/live/kank.com.tr/privkey.pem;
+
+    # Güvenlik başlıkları
+    add_header X-Frame-Options "SAMEORIGIN";
+    add_header X-Content-Type-Options "nosniff";
+    add_header Referrer-Policy "strict-origin-when-cross-origin";
+
+    # Gzip sıkıştırma
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml;
+
+    # Laravel rotaları
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    # Reverb WebSocket proxy (Laravel Echo bağlantısı)
+    location ~ ^/(app|apps|broadcasting) {
+        proxy_pass         http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade $http_upgrade;
+        proxy_set_header   Connection "Upgrade";
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_read_timeout 60s;
+    }
+
+    # PHP-FPM
+    location ~ \.php$ {
+        fastcgi_pass   unix:/run/php/php8.3-fpm.sock;
+        fastcgi_index  index.php;
+        include        fastcgi_params;
+        fastcgi_param  SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+    }
+
+    # Statik dosyalar — uzun cache
+    location ~* \.(css|js|png|jpg|jpeg|gif|ico|svg|woff2|woff)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Gizli dosyalara erişimi engelle
+    location ~ /\. {
+        deny all;
+    }
+
+    client_max_body_size 10M;
+    charset utf-8;
+}

@@ -1,0 +1,31 @@
+{
+    "name": "Kankio",
+    "short_name": "Kankio",
+    "description": "Senkronize müzik dinle, arkadaşlarınla sesli sohbet et.",
+    "lang": "tr",
+    "start_url": "./chat",
+    "scope": "./",
+    "display": "standalone",
+    "orientation": "any",
+    "background_color": "#09090b",
+    "theme_color": "#09090b",
+    "categories": ["social", "entertainment", "music"],
+    "icons": [
+        {
+            "src": "./icons/icon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any maskable"
+        }
+    ],
+    "screenshots": [],
+    "shortcuts": [
+        {
+            "name": "Sohbet",
+            "short_name": "Sohbet",
+            "description": "Odaları görüntüle",
+            "url": "./chat",
+            "icons": [{ "src": "./icons/icon.svg", "sizes": "any" }]
+        }
+    ]
+}

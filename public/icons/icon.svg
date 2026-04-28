@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#09090b" rx="96"/>
+  <!-- Emerald glow ring -->
+  <circle cx="256" cy="256" r="200" fill="none" stroke="#34d399" stroke-width="12" opacity="0.25"/>
+  <circle cx="256" cy="256" r="170" fill="none" stroke="#34d399" stroke-width="3" opacity="0.5"/>
+  <!-- Letter K — vertical bar -->
+  <rect x="148" y="112" width="44" height="288" rx="12" fill="#34d399"/>
+  <!-- K upper arm -->
+  <polygon points="192,256 320,112 364,112 236,256" fill="#34d399"/>
+  <!-- K lower arm -->
+  <polygon points="192,256 236,256 364,400 320,400" fill="#34d399"/>
+</svg>

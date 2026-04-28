@@ -1,0 +1,36 @@
+[package]
+name = "kankio-desktop"
+version = "1.1.0"
+description = "Kankio — Ses ve Müzik Masaüstü İstemcisi"
+authors = ["Kankio"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "kankio_desktop_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri                        = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-shell           = "2"
+tauri-plugin-notification    = "2"
+serde                        = { version = "1", features = ["derive"] }
+serde_json                   = "1"
+
+# ── Release: minimal binary size + RAM footprint ──────────────────────────────
+[profile.release]
+panic         = "abort"   # no unwinding machinery
+codegen-units = 1         # maximum optimization — single codegen unit
+lto           = true      # link-time optimization across all crates
+opt-level     = "s"       # optimize for SIZE (smallest binary)
+strip         = true      # strip debug symbols from binary
+incremental   = false     # disable for deterministic release builds
+
+# ── Dev: fast compile, skip optimizations ─────────────────────────────────────
+[profile.dev]
+opt-level    = 0
+incremental  = true
