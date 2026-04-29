@@ -1093,8 +1093,7 @@ function chatRoom() {
                created synchronously within a user gesture (keydown/click).
                After await, the gesture context is consumed → audio blocked.
                Solution: create/unlock the iframe NOW, swap video after fetch. */
-            const isPlayCmd = /^\/play\s+/i.test(text);
-            if (isPlayCmd && this.voiceState.in_voice) {
+            if (this._isSlashCommand(text) && this.voiceState.in_voice) {
                 this._playerMuted = false;
                 this._ensureIframeReady();
             }
@@ -1839,6 +1838,10 @@ function chatRoom() {
         ],
 
         async voiceJoin() {
+            /* Unlock audio for YouTube iframe immediately, BEFORE getUserMedia await */
+            this._playerMuted = false;
+            this._ensureIframeReady();
+
             try {
                 this._localStream = await navigator.mediaDevices.getUserMedia({
                     audio: {
