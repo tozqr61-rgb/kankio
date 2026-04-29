@@ -758,8 +758,23 @@ function unlockAudio(btn) {
         <div class="flex-1 min-w-0">
             <p class="text-xs font-medium leading-tight"
                :style="voiceState.is_muted ? 'color:rgba(251,191,36,1)' : 'color:rgba(52,211,153,1)'"
-               x-text="voiceState.is_muted ? '🔇 Sessizde' : `${voiceState.participants?.length || 0} kişi sesli`"></p>
+               x-text="voiceState.is_muted ? '🔇 Sessizde' : (musicState.video_id && musicState.is_playing ? '🎵 ' + (musicState.video_title || 'Çalıyor').substring(0,20) : `${voiceState.participants?.length || 0} kişi sesli`)"></p>
         </div>
+
+        {{-- Music speaker toggle (mobile) --}}
+        <button x-show="musicState.video_id && musicState.is_playing" @click="muteToggle()"
+                class="h-9 w-9 rounded-xl flex items-center justify-center shrink-0 transition-all"
+                :style="_playerMuted
+                    ? 'background:rgba(239,68,68,0.15);color:rgba(248,113,113,1);border:1px solid rgba(239,68,68,0.25)'
+                    : 'background:rgba(16,185,129,0.15);color:rgba(52,211,153,1);border:1px solid rgba(16,185,129,0.25)'"
+                :title="_playerMuted ? 'Müzik Sesini Aç' : 'Müzik Sesini Kapat'">
+            <svg x-show="!_playerMuted" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z"/>
+            </svg>
+            <svg x-show="_playerMuted" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M17.25 9.75L19.5 12m0 0l2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25m-10.5-6l4.72-4.72a.75.75 0 011.28.531V19.94a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.506-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z"/>
+            </svg>
+        </button>
 
         {{-- Mute toggle --}}
         <button @click="voiceToggleMute()"
@@ -1072,6 +1087,18 @@ function chatRoom() {
         async _handleSlashCommand(text) {
             this.sending = true;
             this.inputValue = '';
+
+            /* ── User gesture context: unlock iframe audio BEFORE async fetch ──
+               Browser autoplay policy requires audio-producing elements to be
+               created synchronously within a user gesture (keydown/click).
+               After await, the gesture context is consumed → audio blocked.
+               Solution: create/unlock the iframe NOW, swap video after fetch. */
+            const isPlayCmd = /^\/play\s+/i.test(text);
+            if (isPlayCmd && this.voiceState.in_voice) {
+                this._playerMuted = false;
+                this._ensureIframeReady();
+            }
+
             try {
                 const r = await fetch(`/api/music/${ROOM_ID}/command`, {
                     method: 'POST',
@@ -1088,7 +1115,7 @@ function chatRoom() {
                     return;
                 }
                 if (data.state) {
-                    /* Auto-unmute when in voice — /play is a user gesture context */
+                    /* Unmute for ALL music commands when in voice (not just /play) */
                     if (this.voiceState.in_voice) this._playerMuted = false;
                     this.musicState = data.state;
                     this._applyMusicState(data.state);
@@ -1475,6 +1502,32 @@ function chatRoom() {
             this._ytCurVid  = videoId;
         },
 
+        /* ── Ensure iframe exists in user gesture context ──
+           Creates a blank YouTube embed so the browser associates audio
+           permission with it. Subsequent loadVideoById calls inherit this
+           permission without needing a new user gesture. */
+        _ensureIframeReady() {
+            if (this._ytIframe) {
+                /* Iframe exists — just unmute it via postMessage (user gesture) */
+                this._ytCmd('unMute');
+                this._ytCmd('setVolume', [100]);
+                return;
+            }
+            const c = document.getElementById('yt-player');
+            if (!c) return;
+            c.innerHTML = '';
+            const f = document.createElement('iframe');
+            f.width = '200'; f.height = '112';
+            /* Load minimal embed with autoplay+sound — this "locks" audio permission
+               to this iframe element. loadVideoById will reuse the permission. */
+            f.src = 'https://www.youtube.com/embed/?enablejsapi=1&autoplay=0&mute=0';
+            f.allow = 'autoplay; encrypted-media';
+            f.setAttribute('frameborder', '0');
+            f.style.cssText = 'border:0;width:100%;height:100%;display:block;';
+            c.appendChild(f);
+            this._ytIframe = f;
+        },
+
         _ytCmd(func, args) {
             if (!this._ytIframe || !this._ytIframe.contentWindow) return;
             this._ytIframe.contentWindow.postMessage(
@@ -1506,14 +1559,19 @@ function chatRoom() {
             /* ① New track */
             if (this._ytCurVid !== state.video_id) {
                 this._knownDuration = 0; this._lastCurrentTime = 0;
-                if (!this._playerMuted && this._ytIframe) {
-                    /* iOS: preserve audio unlock — switch video inside existing iframe
-                       instead of creating a new element in an async context */
+                if (this._ytIframe && !this._playerMuted) {
+                    /* CRITICAL: Reuse existing iframe via postMessage API.
+                       loadVideoById inherits the audio permission that was
+                       granted when the iframe was created in user gesture context.
+                       Creating a new iframe here would LOSE audio permission
+                       because _applyMusicState runs in async/event context. */
                     this._ytCmd('loadVideoById', [{ videoId: state.video_id, startSeconds: Math.floor(pos) }]);
+                    this._ytCmd('unMute');
+                    this._ytCmd('setVolume', [100]);
                     if (!state.is_playing) this._ytCmd('pauseVideo');
                     this._ytCurVid = state.video_id;
                 } else {
-                    /* Load iframe — respect current mute preference */
+                    /* No iframe yet, or player is muted — safe to create new iframe */
                     const shouldMute = this._playerMuted;
                     this._ytLoad(state.video_id, pos, shouldMute, state.is_playing);
                     this._playerMuted = shouldMute;
@@ -1525,13 +1583,14 @@ function chatRoom() {
             else if (state.is_playing !== this._ytCurPlay) {
                 this._ytCurPlay = state.is_playing;
                 if (state.is_playing) {
-                    if (!this._playerMuted) {
-                        /* iOS: DO NOT reload — seek + play preserves audio lock */
+                    if (!this._playerMuted && this._ytIframe) {
+                        /* Reuse iframe — seek + play preserves audio lock */
                         this._ytCmd('seekTo', [Math.floor(pos), true]);
                         this._ytCmd('playVideo');
+                        this._ytCmd('unMute');
                     } else {
-                        /* Muted: safe to reload for position sync */
-                        this._ytLoad(state.video_id, pos, true, true);
+                        /* Muted or no iframe: safe to reload for position sync */
+                        this._ytLoad(state.video_id, pos, this._playerMuted, true);
                     }
                 } else {
                     this._ytCmd('pauseVideo');
@@ -1554,11 +1613,13 @@ function chatRoom() {
         muteToggle() {
             if (!this.musicState.video_id) return;
             if (this._playerMuted) {
-                /* Reload iframe with sound from user gesture context.
-                   This is the only reliable approach on iOS Safari — postMessage
-                   unMute() is NOT treated as a user gesture inside the iframe. */
+                /* User gesture context (click/tap): reload iframe with sound.
+                   This is the ONLY reliable way on iOS Safari — postMessage
+                   unMute() is NOT treated as a user gesture inside the iframe.
+                   On Chrome, postMessage works, but reload is universally safe. */
                 const pos = this._calcPos(this.musicState);
                 this._ytLoad(this.musicState.video_id, pos, false, this.musicState.is_playing);
+                this._ytCurVid = this.musicState.video_id;
                 this._ytCurPlay = this.musicState.is_playing;
                 this._playerMuted = false;
                 /* Re-set end timer for new iframe */
