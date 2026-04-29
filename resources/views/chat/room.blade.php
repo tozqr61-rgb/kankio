@@ -1368,14 +1368,7 @@ function chatRoom() {
                 /* Voice state push (participants list — join/leave events only) */
                 this._echo.channel(`room.${ROOM_ID}.voice`)
                     .listen('.voice.state', (data) => {
-                        if (!this.voiceState.in_voice) {
-                            this.voiceState = { ...this.voiceState, participants: data.participants };
-                            return;
-                        }
-                        const prevIds  = (this.voiceState.participants || []).map(p => p.id);
-                        const newPeers = (data.participants || []).filter(p => p.id != CURRENT_USER.id && !prevIds.includes(p.id));
                         this.voiceState = { ...this.voiceState, participants: data.participants };
-                        newPeers.forEach(p => this._createOffer(p.id));
                     })
                     /* Lightweight mute patch — updates ONE participant, no full re-render */
                     .listen('.voice.mute', ({ user_id, is_muted }) => {
@@ -1385,12 +1378,6 @@ function chatRoom() {
                                 p.id == user_id ? { ...p, is_muted } : p
                             ),
                         };
-                    });
-
-                /* WebRTC signal inbox — private channel */
-                this._echo.private(`voice.signal.${CURRENT_USER.id}`)
-                    .listen('.voice.signal', async (sig) => {
-                        await this._handleSignal(sig);
                     });
 
             } catch(e) { /* Reverb not running — polling/DB fallback */ }
