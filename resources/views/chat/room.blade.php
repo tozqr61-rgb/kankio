@@ -1890,11 +1890,9 @@ function chatRoom() {
             for (const uid in this._remoteRafs) { cancelAnimationFrame(this._remoteRafs[uid]); }
             this._remoteRafs = {};
             this._speakingUsers = {};
-            for (const uid in this._peers) { this._peers[uid].close(); }
-            this._peers = {};
+            for (const uid in this._peers) { this._destroyPeer(uid); }
+            this._iceCandidateBuffer = {};
             if (this._localStream) { this._localStream.getTracks().forEach(t => t.stop()); this._localStream = null; }
-            for (const uid in this._audioEls) { this._audioEls[uid].remove(); }
-            this._audioEls = {};
 
             await fetch(`/api/voice/${this._voiceRoomId}/leave`, {
                 method: 'POST', headers: { 'X-CSRF-TOKEN': CSRF }
@@ -1982,6 +1980,8 @@ function chatRoom() {
             if (this._peers[remoteUserId]) return this._peers[remoteUserId];
             const pc = new RTCPeerConnection({ iceServers: this._iceServers });
             this._peers[remoteUserId] = pc;
+            this._iceCandidateBuffer = this._iceCandidateBuffer || {};
+            this._iceCandidateBuffer[remoteUserId] = [];
 
             if (this._localStream) this._localStream.getTracks().forEach(t => pc.addTrack(t, this._localStream));
 
@@ -2001,19 +2001,15 @@ function chatRoom() {
                         el.addEventListener('canplay', () => {
                             const src = ctx.createMediaStreamSource(e.streams[0]);
                             src.connect(analyser);
-                            /* rAF loop — stops automatically when peer is gone */
                             let _last = 0;
                             const _loop = (t) => {
-                                if (!this._peers[remoteUserId]) { /* peer closed — stop */
-                                    delete this._remoteRafs[remoteUserId];
-                                    return;
-                                }
+                                if (!this._peers[remoteUserId]) { delete this._remoteRafs[remoteUserId]; return; }
                                 if (t - _last >= 120) {
                                     _last = t;
                                     analyser.getByteFrequencyData(data);
                                     const vol = data.reduce((a, b) => a + b, 0) / data.length;
                                     const isSpeaking = vol > 8;
-                                    if (this._speakingUsers[remoteUserId] !== isSpeaking) { /* change guard */
+                                    if (this._speakingUsers[remoteUserId] !== isSpeaking) {
                                         this._speakingUsers = { ...this._speakingUsers, [remoteUserId]: isSpeaking };
                                     }
                                 }
@@ -2024,7 +2020,6 @@ function chatRoom() {
                     } catch(e) {}
                 }
                 this._audioEls[remoteUserId].srcObject = e.streams[0];
-                /* Chrome requires explicit play() for dynamic audio elements */
                 this._audioEls[remoteUserId].play().catch(() => {});
             };
 
@@ -2037,24 +2032,20 @@ function chatRoom() {
                 });
             };
 
-            /* ICE lifecycle — two-stage recovery:
-               1. 'disconnected': soft recovery via restartIce() (handles NAT timeout, brief drops)
-               2. 'failed': hard recovery — close + reopen connection after 2.5 s */
             pc.oniceconnectionstatechange = () => {
                 if (pc.iceConnectionState === 'disconnected') {
                     if (this.voiceState.in_voice && pc.signalingState === 'stable') {
                         try { pc.restartIce(); } catch(e) {}
-                        /* Escalate to hard reconnect if still disconnected after 8 s */
                         setTimeout(() => {
                             if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
-                                pc.close(); delete this._peers[remoteUserId];
+                                this._destroyPeer(remoteUserId);
                                 if (this.voiceState.in_voice) this._createOffer(remoteUserId);
                             }
                         }, 8000);
                     }
                 }
                 if (pc.iceConnectionState === 'failed') {
-                    pc.close(); delete this._peers[remoteUserId];
+                    this._destroyPeer(remoteUserId);
                     if (this.voiceState.in_voice) setTimeout(() => this._createOffer(remoteUserId), 2500);
                 }
             };
@@ -2069,118 +2060,82 @@ function chatRoom() {
             return pc;
         },
 
-        async _createOffer(remoteUserId) {
-            /* Glare prevention: only the peer with HIGHER ID sends the offer.
-               Lower ID peer waits for an offer — it will come from the higher ID peer's polling. */
-            if (CURRENT_USER.id < remoteUserId) return;
-            const pc = this._makePeer(remoteUserId);
-            if (pc.signalingState !== 'stable') return;
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            await fetch(`/api/voice/${this._voiceRoomId}/signal`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
-                body: JSON.stringify({ to_user_id: remoteUserId, type: 'offer', payload: JSON.stringify(offer) })
-            });
+        /* Safely tear down a single peer */
+        _destroyPeer(remoteUserId) {
+            if (this._peers[remoteUserId]) {
+                try { this._peers[remoteUserId].close(); } catch(e) {}
+                delete this._peers[remoteUserId];
+            }
+            if (this._iceCandidateBuffer) delete this._iceCandidateBuffer[remoteUserId];
+            if (this._remoteRafs[remoteUserId]) {
+                cancelAnimationFrame(this._remoteRafs[remoteUserId]);
+                delete this._remoteRafs[remoteUserId];
+            }
+            if (this._audioEls[remoteUserId]) {
+                this._audioEls[remoteUserId].remove();
+                delete this._audioEls[remoteUserId];
+            }
         },
 
-        /* ═══════════ SPA ROOM NAVIGATION ═══════════
-         * changeRoom(id, name?) switches room without a full page reload.
-         * Name is set INSTANTLY from sidebar data (no fetch latency).
-         * Voice never interrupted — only music/message state changes.
-         * ═══════════════════════════════════════════════ */
-        async changeRoom(newRoomId, newRoomName = null) {
-            newRoomId = String(newRoomId);
-            if (newRoomId === this._roomId) return;
-
-            /* Immediately update name + sidebar active indicator (no wait for fetch) */
-            if (newRoomName) {
-                this._roomName = newRoomName;
-                document.title = `#${newRoomName} — Kankio`;
-            }
-            if (typeof Alpine !== 'undefined' && Alpine.store('chat')) {
-                Alpine.store('chat').activeRoomId = newRoomId;
-            }
-
-            /* ── Voice is NOT interrupted. RTCPeerConnections survive because
-               the Alpine component instance stays alive across room switches.
-               Only music / message channels change. ── */
-
-            /* Leave old MUSIC Echo channel only */
-            if (this._echo) {
-                this._echo.leaveChannel(`room.${this._roomId}.music`);
-                /* Leave voice Echo only when NOT in voice (avoids missing join events) */
-                if (!this.voiceState.in_voice) {
-                    this._echo.leaveChannel(`room.${this._roomId}.voice`);
-                }
-            }
-
-            /* Reset message state */
-            this.connected = false;
-            this.messages = [];
-            this.lastMessageAt = null;
-            this._lastMusicHash = '';
-            this._idleCount = 0;
-            clearTimeout(this._pollTimer);
-            if (this._endTimer) { clearTimeout(this._endTimer); this._endTimer = null; }
-            clearInterval(this._seenTimer);
-
-            /* Update mutable room ID (used by all API calls) */
-            ROOM_ID        = newRoomId;
-            this._roomId   = newRoomId;
-
-            /* Fetch room info + first page of messages */
+        async _createOffer(remoteUserId) {
+            /* ── Full-Mesh: BOTH sides send offers to each other.
+               Glare (simultaneous offers) is resolved in _handleSignal
+               by comparing user IDs — lower ID always wins.
+               This guarantees every pair of users gets connected. ── */
+            const pc = this._makePeer(remoteUserId);
+            if (pc.signalingState !== 'stable') return;
             try {
-                const r = await fetch(`/api/rooms/${newRoomId}/frame`, {
-                    headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': CSRF }
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                await fetch(`/api/voice/${this._voiceRoomId}/signal`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                    body: JSON.stringify({ to_user_id: remoteUserId, type: 'offer', payload: JSON.stringify(offer) })
                 });
-                if (r.ok) {
-                    const d = await r.json();
-                    this._roomName = d.name || '';
-                    this.messages  = d.messages || [];
-                    if (this.messages.length) this.lastMessageAt = this.messages[this.messages.length - 1].created_at;
-                    this.musicState = d.music_state || { video_id: null, is_playing: false, queue: [] };
-                    this.roomType   = d.type || 'global';
-                    this.archivedCount = d.archived_count || 0;
-                    this.showArchived = false;
-                    this.archivedMessages = [];
-                    this.archivedPage = 1;
-                    this._applyMusicState(this.musicState);
-                }
-            } catch(e) {}
-
-            /* Push browser history */
-            history.pushState({ roomId: newRoomId }, '', `${APP_URL}/chat/${newRoomId}`);
-
-            /* Re-subscribe Echo for new room — music always, voice only if not in voice */
-            if (this._echo) {
-                this._echo.channel(`room.${this._roomId}.music`)
-                    .listen('.music.state', (state) => { this.musicState = state; this._applyMusicState(state); });
-                if (!this.voiceState.in_voice) {
-                    this._echo.channel(`room.${this._roomId}.voice`)
-                        .listen('.voice.state', (data) => {
-                            const prevIds  = (this.voiceState.participants || []).map(p => p.id);
-                            const newPeers = (data.participants || []).filter(p => p.id != CURRENT_USER.id && !prevIds.includes(p.id));
-                            this.voiceState = { ...this.voiceState, participants: data.participants };
-                            newPeers.forEach(p => this._createOffer(p.id));
-                        });
-                }
+            } catch(e) {
+                console.warn('createOffer failed for', remoteUserId, e);
             }
+        },
 
-            /* Restart polling for new room */
-            this.connected = true;
-            this._schedulePoll(500);
-            this._startSeenTracking();
-            this.$nextTick(() => this.scrollToBottom());
+        /* Drain buffered ICE candidates after remoteDescription is set */
+        async _flushIceCandidates(remoteUserId, pc) {
+            const buf = (this._iceCandidateBuffer || {})[remoteUserId] || [];
+            this._iceCandidateBuffer[remoteUserId] = [];
+            for (const c of buf) {
+                try { await pc.addIceCandidate(c); } catch(e) {}
+            }
         },
 
         async _handleSignal(sig) {
             try {
                 const fromId = sig.from_user_id;
-                const pc = this._makePeer(fromId);
+                if (fromId == CURRENT_USER.id) return; /* ignore own signals */
+
                 if (sig.type === 'offer') {
-                    if (pc.signalingState !== 'stable') return; /* Ignore duplicate offer */
-                    await pc.setRemoteDescription(JSON.parse(sig.payload));
+                    let pc = this._peers[fromId];
+
+                    /* ── Glare resolution: both sides sent offers simultaneously ── */
+                    if (pc && pc.signalingState === 'have-local-offer') {
+                        /* Tie-break: lower user ID wins (its offer survives) */
+                        if (CURRENT_USER.id < fromId) {
+                            /* We win — ignore THEIR offer, they will accept OUR answer later */
+                            return;
+                        } else {
+                            /* They win — tear down our offer, accept theirs */
+                            this._destroyPeer(fromId);
+                            pc = null;
+                        }
+                    }
+
+                    /* If peer exists in any non-stable state, tear down and start fresh */
+                    if (pc && pc.signalingState !== 'stable') {
+                        this._destroyPeer(fromId);
+                        pc = null;
+                    }
+
+                    pc = this._makePeer(fromId);
+                    await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(sig.payload)));
+                    await this._flushIceCandidates(fromId, pc);
                     const answer = await pc.createAnswer();
                     await pc.setLocalDescription(answer);
                     await fetch(`/api/voice/${this._voiceRoomId}/signal`, {
@@ -2188,16 +2143,27 @@ function chatRoom() {
                         headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
                         body: JSON.stringify({ to_user_id: fromId, type: 'answer', payload: JSON.stringify(answer) })
                     });
+
                 } else if (sig.type === 'answer') {
-                    if (pc.signalingState !== 'have-local-offer') return; /* Ignore duplicate answer */
-                    await pc.setRemoteDescription(JSON.parse(sig.payload));
+                    const pc = this._peers[fromId];
+                    if (!pc || pc.signalingState !== 'have-local-offer') return;
+                    await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(sig.payload)));
+                    await this._flushIceCandidates(fromId, pc);
+
                 } else if (sig.type === 'ice') {
-                    if (pc.remoteDescription) {
-                        try { await pc.addIceCandidate(JSON.parse(sig.payload)); } catch(e) {}
+                    const pc = this._peers[fromId];
+                    const candidate = new RTCIceCandidate(JSON.parse(sig.payload));
+                    if (pc && pc.remoteDescription) {
+                        try { await pc.addIceCandidate(candidate); } catch(e) {}
+                    } else {
+                        /* Buffer ICE candidates that arrive before remoteDescription */
+                        this._iceCandidateBuffer = this._iceCandidateBuffer || {};
+                        if (!this._iceCandidateBuffer[fromId]) this._iceCandidateBuffer[fromId] = [];
+                        this._iceCandidateBuffer[fromId].push(candidate);
                     }
                 }
             } catch (e) {
-                console.error("WebRTC Signal Error:", e);
+                console.error('WebRTC Signal Error:', e);
             }
         }
     }
