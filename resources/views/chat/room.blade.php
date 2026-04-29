@@ -1003,6 +1003,12 @@ function chatRoom() {
             this._startSeenTracking();
         },
 
+        /* ── Room Transition ── */
+        changeRoom(id, name) {
+            window.location.href = `/chat/${id}`;
+        },
+
+
         /* ── Tauri Desktop Integration ── */
         _initTauri() {
             /* Alt+M global shortcut → sent by src-tauri/src/lib.rs via win.eval() */
