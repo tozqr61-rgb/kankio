@@ -1819,75 +1819,86 @@ function chatRoom() {
                 showToast('Mikrofon erişimi reddedildi', 'error'); return;
             }
 
-            this._voiceRoomId = this._roomId; /* lock voice to current room */
-            
-            /* Get LiveKit token from backend */
-            const r = await fetch(`/api/voice/${this._voiceRoomId}/join`, {
-                method: 'POST', headers: { 'X-CSRF-TOKEN': CSRF }
-            });
-            const state = await r.json();
-            this.voiceState = state;
-
-            /* Initialize LiveKit Room */
-            const Room = LivekitClient.Room;
-            const RoomEvent = LivekitClient.RoomEvent;
-            
-            this._lkRoom = new Room({
-                adaptiveStream: true,
-                dynacast: true,
-            });
-
-            this._lkRoom.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
-                if (track.kind === 'audio') {
-                    const el = track.attach();
-                    this._audioEls[participant.identity] = el;
-                }
-            });
-
-            this._lkRoom.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
-                if (track.kind === 'audio') {
-                    track.detach();
-                    if (this._audioEls[participant.identity]) {
-                        this._audioEls[participant.identity].remove();
-                        delete this._audioEls[participant.identity];
-                    }
-                }
-            });
-
-            this._lkRoom.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
-                const speakingDict = {};
-                for (const p of speakers) {
-                    speakingDict[p.identity] = true;
-                }
-                this._speakingUsers = speakingDict;
-            });
-
-            this._lkRoom.on(RoomEvent.Disconnected, () => {
-                if (this.voiceState.in_voice) {
-                    this.voiceLeave();
-                }
-            });
-
             try {
+                this._voiceRoomId = this._roomId; /* lock voice to current room */
+                
+                /* Get LiveKit token from backend */
+                const r = await fetch(`/api/voice/${this._voiceRoomId}/join`, {
+                    method: 'POST', headers: { 'X-CSRF-TOKEN': CSRF }
+                });
+                const state = await r.json();
+                
+                if (!r.ok) {
+                    showToast(state.error || 'Ses API hatası oluştu', 'error');
+                    return;
+                }
+                
+                if (!state.livekit_url || !state.livekit_token) {
+                    showToast('Sunucu LiveKit bilgilerini döndürmedi. .env dosyasını kontrol edin.', 'error');
+                    return;
+                }
+
+                this.voiceState = state;
+
+                /* Initialize LiveKit Room */
+                const Room = LivekitClient.Room;
+                const RoomEvent = LivekitClient.RoomEvent;
+                
+                this._lkRoom = new Room({
+                    adaptiveStream: true,
+                    dynacast: true,
+                });
+
+                this._lkRoom.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+                    if (track.kind === 'audio') {
+                        const el = track.attach();
+                        this._audioEls[participant.identity] = el;
+                    }
+                });
+
+                this._lkRoom.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
+                    if (track.kind === 'audio') {
+                        track.detach();
+                        if (this._audioEls[participant.identity]) {
+                            this._audioEls[participant.identity].remove();
+                            delete this._audioEls[participant.identity];
+                        }
+                    }
+                });
+
+                this._lkRoom.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+                    const speakingDict = {};
+                    for (const p of speakers) {
+                        speakingDict[p.identity] = true;
+                    }
+                    this._speakingUsers = speakingDict;
+                });
+
+                this._lkRoom.on(RoomEvent.Disconnected, () => {
+                    if (this.voiceState.in_voice) {
+                        this.voiceLeave();
+                    }
+                });
+
                 await this._lkRoom.connect(state.livekit_url, state.livekit_token);
                 await this._lkRoom.localParticipant.setMicrophoneEnabled(true);
                 
                 showToast('Ses kanalına bağlanıldı', 'success');
+                
+                /* Fallback polling to keep session alive and sync mute states of participants */
+                this._startVoicePolling();
+
+                /* Discord-style: start music UNMUTED when joining voice */
+                if (this.musicState.video_id) {
+                    this._playerMuted = false;
+                    this._applyMusicState(this.musicState);
+                }
             } catch (error) {
                 console.error('Could not connect to LiveKit:', error);
-                showToast('Ses kanalına bağlanılamadı', 'error');
+                showToast('Ses kanalına bağlanılamadı: ' + error.message, 'error');
                 this.voiceLeave();
-                return;
             }
 
-            /* Fallback polling to keep session alive and sync mute states of participants */
-            this._startVoicePolling();
-
-            /* Discord-style: start music UNMUTED when joining voice */
-            if (this.musicState.video_id) {
-                this._playerMuted = false;
-                this._applyMusicState(this.musicState);
-            }
         },
 
         async voiceLeave() {
