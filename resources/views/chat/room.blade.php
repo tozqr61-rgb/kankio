@@ -2175,21 +2175,29 @@ function chatRoom() {
         },
 
         async _handleSignal(sig) {
-            const fromId = sig.from_user_id;
-            const pc = this._makePeer(fromId);
-            if (sig.type === 'offer') {
-                await pc.setRemoteDescription(JSON.parse(sig.payload));
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-                await fetch(`/api/voice/${this._voiceRoomId}/signal`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
-                    body: JSON.stringify({ to_user_id: fromId, type: 'answer', payload: JSON.stringify(answer) })
-                });
-            } else if (sig.type === 'answer') {
-                await pc.setRemoteDescription(JSON.parse(sig.payload));
-            } else if (sig.type === 'ice') {
-                try { await pc.addIceCandidate(JSON.parse(sig.payload)); } catch(e) {}
+            try {
+                const fromId = sig.from_user_id;
+                const pc = this._makePeer(fromId);
+                if (sig.type === 'offer') {
+                    if (pc.signalingState !== 'stable') return; /* Ignore duplicate offer */
+                    await pc.setRemoteDescription(JSON.parse(sig.payload));
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
+                    await fetch(`/api/voice/${this._voiceRoomId}/signal`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                        body: JSON.stringify({ to_user_id: fromId, type: 'answer', payload: JSON.stringify(answer) })
+                    });
+                } else if (sig.type === 'answer') {
+                    if (pc.signalingState !== 'have-local-offer') return; /* Ignore duplicate answer */
+                    await pc.setRemoteDescription(JSON.parse(sig.payload));
+                } else if (sig.type === 'ice') {
+                    if (pc.remoteDescription) {
+                        try { await pc.addIceCandidate(JSON.parse(sig.payload)); } catch(e) {}
+                    }
+                }
+            } catch (e) {
+                console.error("WebRTC Signal Error:", e);
             }
         }
     }
