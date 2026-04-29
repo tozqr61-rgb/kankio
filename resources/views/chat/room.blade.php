@@ -957,15 +957,12 @@ function chatRoom() {
         /* Voice state */
         voiceState: { in_voice: false, is_muted: false, participants: [] },
         _voiceRoomId: null,   /* room where voice is LOCKED — never changes during navigation */
-        _peers: {},           /* { userId: RTCPeerConnection } */
-        _localStream: null,
+        _lkRoom: null,        /* LiveKit Room instance */
         _audioEls: {},        /* { userId: HTMLAudioElement } */
         _voiceTimer: null,
 
         /* Active speaker detection */
         _speakingUsers: {},   /* { userId: bool } */
-        _isSpeaking: false,
-        _audioCtx: null,
         _speakingTimer: null,
 
         /* Shared Echo instance */
@@ -1293,15 +1290,8 @@ function chatRoom() {
                     /* Re-sync music state */
                     this._syncMusic();
                     /* Re-create broken voice connections */
-                    if (this.voiceState.in_voice) {
-                        for (const uid in this._peers) {
-                            const state = this._peers[uid]?.connectionState;
-                            if (state === 'failed' || state === 'disconnected' || state === 'closed') {
-                                this._peers[uid]?.close();
-                                delete this._peers[uid];
-                                this._createOffer(Number(uid));
-                            }
-                        }
+                    if (this.voiceState.in_voice && this._lkRoom && this._lkRoom.state === 'disconnected') {
+                        try { this._lkRoom.connect(this.voiceState.livekit_url, this.voiceState.livekit_token); } catch(e) {}
                     }
                     this.connected = true;
                 }, 1500);
@@ -1824,56 +1814,83 @@ function chatRoom() {
             }, 10000);
         },
 
-        /* ══════════ VOICE CHAT (WebRTC + polling signaling) ═══════════ */
-        _iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' },
-            { urls: 'stun:stun3.l.google.com:19302' },
-            { urls: 'stun:stun4.l.google.com:19302' },
-            /* Free public TURN — fallback for strict NAT/symmetric NAT */
-            { urls: 'turn:openrelay.metered.ca:80',              username: 'openrelayproject', credential: 'openrelayproject' },
-            { urls: 'turn:openrelay.metered.ca:443',             username: 'openrelayproject', credential: 'openrelayproject' },
-            { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-        ],
-
+        /* ══════════ VOICE CHAT (LiveKit) ═══════════ */
         async voiceJoin() {
-            /* Unlock audio for YouTube iframe immediately, BEFORE getUserMedia await */
+            /* Unlock audio for YouTube iframe immediately */
             this._playerMuted = false;
             this._ensureIframeReady();
 
             try {
-                this._localStream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        echoCancellation:  { ideal: true },
-                        noiseSuppression:  { ideal: true },
-                        autoGainControl:   { ideal: true },
-                        channelCount:      1,          /* mono — halves the data rate */
-                        sampleRate:        { ideal: 16000, max: 48000 }, /* 16 kHz is optimal for speech */
-                        latency:           { ideal: 0.02 },
-                    },
-                    video: false,
-                });
+                await navigator.mediaDevices.getUserMedia({ audio: true });
             } catch(e) {
                 showToast('Mikrofon erişimi reddedildi', 'error'); return;
             }
+
             this._voiceRoomId = this._roomId; /* lock voice to current room */
+            
+            /* Get LiveKit token from backend */
             const r = await fetch(`/api/voice/${this._voiceRoomId}/join`, {
                 method: 'POST', headers: { 'X-CSRF-TOKEN': CSRF }
             });
             const state = await r.json();
             this.voiceState = state;
 
-            /* Create offers to everyone already in the channel */
-            for (const p of (state.participants || [])) {
-                if (p.id != CURRENT_USER.id) await this._createOffer(p.id);
+            /* Initialize LiveKit Room */
+            const Room = LivekitClient.Room;
+            const RoomEvent = LivekitClient.RoomEvent;
+            
+            this._lkRoom = new Room({
+                adaptiveStream: true,
+                dynacast: true,
+            });
+
+            this._lkRoom.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+                if (track.kind === 'audio') {
+                    const el = track.attach();
+                    this._audioEls[participant.identity] = el;
+                }
+            });
+
+            this._lkRoom.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
+                if (track.kind === 'audio') {
+                    track.detach();
+                    if (this._audioEls[participant.identity]) {
+                        this._audioEls[participant.identity].remove();
+                        delete this._audioEls[participant.identity];
+                    }
+                }
+            });
+
+            this._lkRoom.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+                const speakingDict = {};
+                for (const p of speakers) {
+                    speakingDict[p.identity] = true;
+                }
+                this._speakingUsers = speakingDict;
+            });
+
+            this._lkRoom.on(RoomEvent.Disconnected, () => {
+                if (this.voiceState.in_voice) {
+                    this.voiceLeave();
+                }
+            });
+
+            try {
+                await this._lkRoom.connect(state.livekit_url, state.livekit_token);
+                await this._lkRoom.localParticipant.setMicrophoneEnabled(true);
+                
+                showToast('Ses kanalına bağlanıldı', 'success');
+            } catch (error) {
+                console.error('Could not connect to LiveKit:', error);
+                showToast('Ses kanalına bağlanılamadı', 'error');
+                this.voiceLeave();
+                return;
             }
 
-            this._setupSpeakingDetection();
+            /* Fallback polling to keep session alive and sync mute states of participants */
             this._startVoicePolling();
 
-            /* Discord-style: start music UNMUTED when joining voice.
-               voiceJoin() is a user gesture — safe to autoplay with sound. */
+            /* Discord-style: start music UNMUTED when joining voice */
             if (this.musicState.video_id) {
                 this._playerMuted = false;
                 this._applyMusicState(this.musicState);
@@ -1882,21 +1899,24 @@ function chatRoom() {
 
         async voiceLeave() {
             clearInterval(this._voiceTimer);
-            clearInterval(this._speakingTimer);
-            if (this._audioCtx) { try { this._audioCtx.close(); } catch(e) {} this._audioCtx = null; }
-            this._isSpeaking = false;
-            /* Cancel all rAF speaking loops to prevent ghost timers */
-            if (this._speakRaf) { cancelAnimationFrame(this._speakRaf); this._speakRaf = null; }
-            for (const uid in this._remoteRafs) { cancelAnimationFrame(this._remoteRafs[uid]); }
-            this._remoteRafs = {};
             this._speakingUsers = {};
-            for (const uid in this._peers) { this._destroyPeer(uid); }
-            this._iceCandidateBuffer = {};
-            if (this._localStream) { this._localStream.getTracks().forEach(t => t.stop()); this._localStream = null; }
+            
+            if (this._lkRoom) {
+                await this._lkRoom.disconnect();
+                this._lkRoom = null;
+            }
 
-            await fetch(`/api/voice/${this._voiceRoomId}/leave`, {
-                method: 'POST', headers: { 'X-CSRF-TOKEN': CSRF }
-            });
+            for (const uid in this._audioEls) {
+                if (this._audioEls[uid]) this._audioEls[uid].remove();
+            }
+            this._audioEls = {};
+
+            if (this._voiceRoomId) {
+                await fetch(`/api/voice/${this._voiceRoomId}/leave`, {
+                    method: 'POST', headers: { 'X-CSRF-TOKEN': CSRF }
+                });
+            }
+            
             this._voiceRoomId = null;
             this.voiceState = { in_voice: false, is_muted: false, participants: [] };
 
@@ -1906,9 +1926,9 @@ function chatRoom() {
         },
 
         async voiceToggleMute() {
-            if (this._localStream) {
+            if (this._lkRoom && this._lkRoom.localParticipant) {
                 const newMuted = !this.voiceState.is_muted;
-                this._localStream.getAudioTracks().forEach(t => t.enabled = !newMuted);
+                await this._lkRoom.localParticipant.setMicrophoneEnabled(!newMuted);
                 await fetch(`/api/voice/${this._voiceRoomId}/mute`, {
                     method: 'POST', headers: { 'X-CSRF-TOKEN': CSRF }
                 });
@@ -1916,255 +1936,21 @@ function chatRoom() {
             }
         },
 
-        /* ── Active speaker detection ── */
-        _setupSpeakingDetection() {
-            if (!this._localStream) return;
-            try {
-                this._audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                const analyser = this._audioCtx.createAnalyser();
-                /* 512 bins @ 16kHz = finer resolution; smoothing avoids flicker */
-                analyser.fftSize = 512;
-                analyser.smoothingTimeConstant = 0.8;
-                const source = this._audioCtx.createMediaStreamSource(this._localStream);
-                source.connect(analyser);
-                const data = new Uint8Array(analyser.frequencyBinCount);
-
-                /* rAF loop — auto-stops when stream is released; ~10 Hz effective check rate */
-                let _last = 0;
-                const _loop = (t) => {
-                    if (!this._localStream || !this.voiceState.in_voice) return; /* self-terminating */
-                    if (t - _last >= 100) {
-                        _last = t;
-                        if (this.voiceState.is_muted) {
-                            if (this._isSpeaking) {
-                                this._isSpeaking = false;
-                                this._speakingUsers = { ...this._speakingUsers, [CURRENT_USER.id]: false };
-                            }
-                        } else {
-                            analyser.getByteFrequencyData(data);
-                            const vol = data.reduce((a, b) => a + b, 0) / data.length;
-                            const speaking = vol > 12;
-                            if (speaking !== this._isSpeaking) { /* change guard — no needless Alpine diffing */
-                                this._isSpeaking = speaking;
-                                this._speakingUsers = { ...this._speakingUsers, [CURRENT_USER.id]: speaking };
-                            }
-                        }
-                    }
-                    this._speakRaf = requestAnimationFrame(_loop);
-                };
-                this._speakRaf = requestAnimationFrame(_loop);
-            } catch(e) {}
-        },
-
-        /* ── Polling fallback at 1.5s — fast enough for ICE exchange if Reverb is down ── */
+        /* ── Polling to keep backend session alive & update participant metadata (like avatar/is_muted) ── */
         _startVoicePolling() {
             this._voiceTimer = setInterval(async () => {
-                if (!this.voiceState.in_voice) return;
+                if (!this.voiceState.in_voice || !this._voiceRoomId) return;
                 try {
                     const sr = await fetch(`/api/voice/${this._voiceRoomId}/state`);
                     const state = await sr.json();
-                    const prevIds  = (this.voiceState.participants || []).map(p => p.id);
-                    const newPeers = (state.participants || []).filter(p => p.id != CURRENT_USER.id && !prevIds.includes(p.id));
-                    this.voiceState = { ...this.voiceState, ...state };
-                    for (const p of newPeers) await this._createOffer(p.id);
-
-                    /* DB-stored signals (fallback for missed Reverb events) */
-                    const gr = await fetch(`/api/voice/${this._voiceRoomId}/signals`);
-                    const signals = await gr.json();
-                    for (const sig of signals) await this._handleSignal(sig);
+                    
+                    /* Keep token and url intact from original join */
+                    const token = this.voiceState.livekit_token;
+                    const url = this.voiceState.livekit_url;
+                    
+                    this.voiceState = { ...this.voiceState, ...state, livekit_token: token, livekit_url: url };
                 } catch(e) {}
-            }, 1500);
-        },
-
-        _makePeer(remoteUserId) {
-            if (this._peers[remoteUserId]) return this._peers[remoteUserId];
-            const pc = new RTCPeerConnection({ iceServers: this._iceServers });
-            this._peers[remoteUserId] = pc;
-            this._iceCandidateBuffer = this._iceCandidateBuffer || {};
-            this._iceCandidateBuffer[remoteUserId] = [];
-
-            if (this._localStream) this._localStream.getTracks().forEach(t => pc.addTrack(t, this._localStream));
-
-            pc.ontrack = (e) => {
-                if (!this._audioEls[remoteUserId]) {
-                    const el = document.createElement('audio');
-                    el.autoplay = true; el.style.display = 'none';
-                    document.body.appendChild(el);
-                    this._audioEls[remoteUserId] = el;
-
-                    /* Remote speaking detection via AudioContext */
-                    try {
-                        const ctx      = new (window.AudioContext || window.webkitAudioContext)();
-                        const analyser = ctx.createAnalyser();
-                        analyser.fftSize = 256;
-                        const data = new Uint8Array(analyser.frequencyBinCount);
-                        el.addEventListener('canplay', () => {
-                            const src = ctx.createMediaStreamSource(e.streams[0]);
-                            src.connect(analyser);
-                            let _last = 0;
-                            const _loop = (t) => {
-                                if (!this._peers[remoteUserId]) { delete this._remoteRafs[remoteUserId]; return; }
-                                if (t - _last >= 120) {
-                                    _last = t;
-                                    analyser.getByteFrequencyData(data);
-                                    const vol = data.reduce((a, b) => a + b, 0) / data.length;
-                                    const isSpeaking = vol > 8;
-                                    if (this._speakingUsers[remoteUserId] !== isSpeaking) {
-                                        this._speakingUsers = { ...this._speakingUsers, [remoteUserId]: isSpeaking };
-                                    }
-                                }
-                                this._remoteRafs[remoteUserId] = requestAnimationFrame(_loop);
-                            };
-                            this._remoteRafs[remoteUserId] = requestAnimationFrame(_loop);
-                        });
-                    } catch(e) {}
-                }
-                this._audioEls[remoteUserId].srcObject = e.streams[0];
-                this._audioEls[remoteUserId].play().catch(() => {});
-            };
-
-            pc.onicecandidate = async (e) => {
-                if (!e.candidate) return;
-                await fetch(`/api/voice/${this._voiceRoomId}/signal`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
-                    body: JSON.stringify({ to_user_id: remoteUserId, type: 'ice', payload: JSON.stringify(e.candidate) })
-                });
-            };
-
-            pc.oniceconnectionstatechange = () => {
-                if (pc.iceConnectionState === 'disconnected') {
-                    if (this.voiceState.in_voice && pc.signalingState === 'stable') {
-                        try { pc.restartIce(); } catch(e) {}
-                        setTimeout(() => {
-                            if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
-                                this._destroyPeer(remoteUserId);
-                                if (this.voiceState.in_voice) this._createOffer(remoteUserId);
-                            }
-                        }, 8000);
-                    }
-                }
-                if (pc.iceConnectionState === 'failed') {
-                    this._destroyPeer(remoteUserId);
-                    if (this.voiceState.in_voice) setTimeout(() => this._createOffer(remoteUserId), 2500);
-                }
-            };
-
-            pc.onconnectionstatechange = () => {
-                if (pc.connectionState === 'connected') {
-                    const name = (this.voiceState.participants || []).find(p => p.id == remoteUserId)?.username || 'Kullanıcı';
-                    showToast(`${name} ile ses bağlantısı kuruldu`, 'success');
-                }
-            };
-
-            return pc;
-        },
-
-        /* Safely tear down a single peer */
-        _destroyPeer(remoteUserId) {
-            if (this._peers[remoteUserId]) {
-                try { this._peers[remoteUserId].close(); } catch(e) {}
-                delete this._peers[remoteUserId];
-            }
-            if (this._iceCandidateBuffer) delete this._iceCandidateBuffer[remoteUserId];
-            if (this._remoteRafs[remoteUserId]) {
-                cancelAnimationFrame(this._remoteRafs[remoteUserId]);
-                delete this._remoteRafs[remoteUserId];
-            }
-            if (this._audioEls[remoteUserId]) {
-                this._audioEls[remoteUserId].remove();
-                delete this._audioEls[remoteUserId];
-            }
-        },
-
-        async _createOffer(remoteUserId) {
-            /* ── Full-Mesh: BOTH sides send offers to each other.
-               Glare (simultaneous offers) is resolved in _handleSignal
-               by comparing user IDs — lower ID always wins.
-               This guarantees every pair of users gets connected. ── */
-            const pc = this._makePeer(remoteUserId);
-            if (pc.signalingState !== 'stable') return;
-            try {
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                await fetch(`/api/voice/${this._voiceRoomId}/signal`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
-                    body: JSON.stringify({ to_user_id: remoteUserId, type: 'offer', payload: JSON.stringify(offer) })
-                });
-            } catch(e) {
-                console.warn('createOffer failed for', remoteUserId, e);
-            }
-        },
-
-        /* Drain buffered ICE candidates after remoteDescription is set */
-        async _flushIceCandidates(remoteUserId, pc) {
-            const buf = (this._iceCandidateBuffer || {})[remoteUserId] || [];
-            this._iceCandidateBuffer[remoteUserId] = [];
-            for (const c of buf) {
-                try { await pc.addIceCandidate(c); } catch(e) {}
-            }
-        },
-
-        async _handleSignal(sig) {
-            try {
-                const fromId = sig.from_user_id;
-                if (fromId == CURRENT_USER.id) return; /* ignore own signals */
-
-                if (sig.type === 'offer') {
-                    let pc = this._peers[fromId];
-
-                    /* ── Glare resolution: both sides sent offers simultaneously ── */
-                    if (pc && pc.signalingState === 'have-local-offer') {
-                        /* Tie-break: lower user ID wins (its offer survives) */
-                        if (CURRENT_USER.id < fromId) {
-                            /* We win — ignore THEIR offer, they will accept OUR answer later */
-                            return;
-                        } else {
-                            /* They win — tear down our offer, accept theirs */
-                            this._destroyPeer(fromId);
-                            pc = null;
-                        }
-                    }
-
-                    /* If peer exists in any non-stable state, tear down and start fresh */
-                    if (pc && pc.signalingState !== 'stable') {
-                        this._destroyPeer(fromId);
-                        pc = null;
-                    }
-
-                    pc = this._makePeer(fromId);
-                    await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(sig.payload)));
-                    await this._flushIceCandidates(fromId, pc);
-                    const answer = await pc.createAnswer();
-                    await pc.setLocalDescription(answer);
-                    await fetch(`/api/voice/${this._voiceRoomId}/signal`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
-                        body: JSON.stringify({ to_user_id: fromId, type: 'answer', payload: JSON.stringify(answer) })
-                    });
-
-                } else if (sig.type === 'answer') {
-                    const pc = this._peers[fromId];
-                    if (!pc || pc.signalingState !== 'have-local-offer') return;
-                    await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(sig.payload)));
-                    await this._flushIceCandidates(fromId, pc);
-
-                } else if (sig.type === 'ice') {
-                    const pc = this._peers[fromId];
-                    const candidate = new RTCIceCandidate(JSON.parse(sig.payload));
-                    if (pc && pc.remoteDescription) {
-                        try { await pc.addIceCandidate(candidate); } catch(e) {}
-                    } else {
-                        /* Buffer ICE candidates that arrive before remoteDescription */
-                        this._iceCandidateBuffer = this._iceCandidateBuffer || {};
-                        if (!this._iceCandidateBuffer[fromId]) this._iceCandidateBuffer[fromId] = [];
-                        this._iceCandidateBuffer[fromId].push(candidate);
-                    }
-                }
-            } catch (e) {
-                console.error('WebRTC Signal Error:', e);
-            }
+            }, 3000); // Polling reduced to every 3s since LiveKit handles realtime signaling
         }
     }
 }

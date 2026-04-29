@@ -8,6 +8,9 @@ use App\Events\VoiceStateChanged;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Agence104\LiveKit\AccessToken;
+use Agence104\LiveKit\AccessTokenOptions;
+use Agence104\LiveKit\VideoGrant;
 
 class VoiceController extends Controller
 {
@@ -33,6 +36,27 @@ class VoiceController extends Controller
         );
 
         $state = $this->getState($roomId, $userId);
+        
+        // Generate LiveKit Token
+        $tokenOptions = (new AccessTokenOptions())
+            ->setIdentity((string) $userId)
+            ->setName($user->username);
+            
+        $videoGrant = (new VideoGrant())
+            ->setRoomJoin()
+            ->setRoomName('room_' . $roomId);
+
+        $token = (new AccessToken(
+            config('services.livekit.key'),
+            config('services.livekit.secret')
+        ))
+        ->init($tokenOptions)
+        ->setGrant($videoGrant)
+        ->toJwt();
+
+        $state['livekit_token'] = $token;
+        $state['livekit_url'] = config('services.livekit.url');
+
         $this->broadcastVoiceState($roomId, $state['participants']);
         return response()->json($state);
     }
@@ -100,82 +124,7 @@ class VoiceController extends Controller
         return response()->json($this->getState($roomId, $userId));
     }
 
-    /** Post a WebRTC signal (offer / answer / ice) */
-    public function signal(Request $request, $roomId)
-    {
-        $user = Auth::user();
-        if (! $this->canAccessRoom($roomId, $user)) {
-            return response()->json(['error' => 'Erisim reddedildi'], 403);
-        }
 
-        $request->validate([
-            'to_user_id' => 'required|integer|exists:users,id',
-            'type'       => 'required|in:offer,answer,ice',
-            'payload'    => 'required|string',
-        ]);
-
-        $fromId = $user->id;
-
-        DB::table('voice_signals')->insert([
-            'room_id'      => $roomId,
-            'from_user_id' => $fromId,
-            'to_user_id'   => $request->to_user_id,
-            'type'         => $request->type,
-            'payload'      => $request->payload,
-            'processed'    => false,
-            'created_at'   => now(),
-            'updated_at'   => now(),
-        ]);
-
-        /* Instant delivery via Reverb — DB record is the fallback */
-        try {
-            broadcast(new VoiceSignalEvent(
-                toUserId:   $request->to_user_id,
-                fromUserId: $fromId,
-                type:       $request->type,
-                payload:    $request->payload,
-            ));
-        } catch (\Throwable) {}
-
-        return response()->json(['ok' => true]);
-    }
-
-    /** Get and consume pending signals for current user in this room */
-    public function getSignals($roomId)
-    {
-        $user = Auth::user();
-        if (! $this->canAccessRoom($roomId, $user)) {
-            return response()->json(['error' => 'Erisim reddedildi'], 403);
-        }
-        $userId = $user->id;
-
-        $signals = DB::table('voice_signals')
-            ->where('room_id', $roomId)
-            ->where('to_user_id', $userId)
-            ->where('processed', false)
-            ->orderBy('created_at')
-            ->get();
-
-        if ($signals->count()) {
-            DB::table('voice_signals')
-                ->whereIn('id', $signals->pluck('id'))
-                ->update(['processed' => true]);
-        }
-
-        // Clean up old processed signals (> 30s)
-        DB::table('voice_signals')
-            ->where('room_id', $roomId)
-            ->where('processed', true)
-            ->where('created_at', '<', now()->subSeconds(30))
-            ->delete();
-
-        return response()->json($signals->map(fn($s) => [
-            'id'          => $s->id,
-            'from_user_id'=> $s->from_user_id,
-            'type'        => $s->type,
-            'payload'     => $s->payload,
-        ]));
-    }
 
     private function broadcastVoiceState(int $roomId, $participants = null): void
     {

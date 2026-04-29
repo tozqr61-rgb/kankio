@@ -68,8 +68,6 @@ Route::middleware('auth')->group(function () {
     Route::post('/api/voice/{roomId}/leave', [VoiceController::class, 'leave'])->name('api.voice.leave');
     Route::post('/api/voice/{roomId}/mute', [VoiceController::class, 'toggleMute'])->name('api.voice.mute');
     Route::get('/api/voice/{roomId}/state', [VoiceController::class, 'state'])->name('api.voice.state');
-    Route::post('/api/voice/{roomId}/signal', [VoiceController::class, 'signal'])->name('api.voice.signal');
-    Route::get('/api/voice/{roomId}/signals', [VoiceController::class, 'getSignals'])->name('api.voice.signals');
 
     // Admin
     Route::middleware('admin')->prefix('admin')->group(function () {
