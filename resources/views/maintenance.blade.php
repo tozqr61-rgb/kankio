@@ -113,14 +113,24 @@
     <div class="orb orb-3"></div>
 
     <div class="container">
-        <div class="icon">🔧</div>
         <div class="status-badge"><span class="dot"></span> Bakım Modu Aktif</div>
         <h1>Kankio Şu An Bakımda</h1>
         <p>
             Platformumuzu sizin için daha iyi hale getirmek adına kısa bir bakım çalışması yapıyoruz.
             Lütfen biraz sonra tekrar deneyin. Anlayışınız için teşekkürler! 💜
         </p>
-        <a href="/login" class="login-link">Admin Girişi →</a>
+        <!-- Gizli admin girişi: logoya 5 kez tıkla -->
+        <div class="secret-tap" @click="tapLogin()" style="cursor:default;user-select:none">🔧</div>
     </div>
+    <script>
+        let _tc = 0, _tt = null;
+        function tapLogin() {
+            _tc++;
+            clearTimeout(_tt);
+            _tt = setTimeout(() => _tc = 0, 2000);
+            if (_tc >= 5) { _tc = 0; window.location.href = '/login'; }
+        }
+        document.querySelector('.secret-tap').addEventListener('click', tapLogin);
+    </script>
 </body>
 </html>
