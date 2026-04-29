@@ -19,6 +19,25 @@
         </div>
     </div>
 
+    <!-- Bakım Modu -->
+    <div class="mt-6 pt-6 border-t border-white/10">
+        @php $maintenanceOn = \Illuminate\Support\Facades\Cache::get('maintenance_mode', false); @endphp
+        <div class="flex items-center justify-between max-w-xl p-4 border rounded-2xl" style="background:rgba(255,255,255,0.03);border-color:rgba(255,255,255,0.07)">
+            <div class="flex items-center gap-3">
+                <span class="text-xl">🔧</span>
+                <div>
+                    <h3 class="text-sm font-bold text-white">Bakım Modu</h3>
+                    <p class="text-xs text-zinc-500">Aktifken sadece adminler siteye erişebilir.</p>
+                </div>
+            </div>
+            <button @click="toggleMaintenance()"
+                class="px-4 py-2 rounded-xl text-sm font-bold transition-all"
+                :style="maintenance ? 'background:rgba(239,68,68,0.15);color:rgba(248,113,113,1);border:1px solid rgba(239,68,68,0.3)' : 'background:rgba(16,185,129,0.15);color:rgba(52,211,153,1);border:1px solid rgba(16,185,129,0.3)'"
+                x-text="maintenance ? '🔴 KAPALI Yap' : '🟢 AÇ'">
+            </button>
+        </div>
+    </div>
+
     <!-- Duyuru Yönetimi -->
     <div class="mt-8 pt-6 border-t border-white/10">
         <h2 class="text-xl font-bold tracking-tight mb-4 text-white">📢 Sistem Duyurusu</h2>
@@ -158,6 +177,17 @@ function adminDashboard() {
         cleaningOld: false, cleaningAll: false,
         ann: { message: '', type: 'info', expires_at: '', sending: false },
         app: { version: '', drive_link: '', notes: '', sending: false },
+        maintenance: {{ \Illuminate\Support\Facades\Cache::get('maintenance_mode', false) ? 'true' : 'false' }},
+
+        async toggleMaintenance() {
+            const r = await fetch(`/admin/maintenance`, {
+                method: 'POST',
+                headers: { 'X-CSRF-TOKEN': CSRF },
+            });
+            const d = await r.json();
+            this.maintenance = d.maintenance;
+            showToast(d.maintenance ? 'Bakım modu açıldı' : 'Bakım modu kapatıldı');
+        },
 
         async postAppRelease() {
             if (!this.app.version.trim() || !this.app.drive_link.trim()) return;

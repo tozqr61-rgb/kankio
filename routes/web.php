@@ -13,6 +13,9 @@ use App\Http\Controllers\VoiceController;
 // Landing
 Route::get('/', fn() => view('landing'))->name('landing');
 
+// Maintenance page
+Route::get('/maintenance', fn() => view('maintenance'))->name('maintenance');
+
 // Bağlantıda Kal — doğum günü sayfası
 Route::get('/baglantikal', [App\Http\Controllers\BaglantiKalController::class, 'index'])->name('stay.connected');
 Route::post('/baglantikal/kaydet', [App\Http\Controllers\BaglantiKalController::class, 'save'])->name('stay.save');
@@ -86,5 +89,6 @@ Route::middleware('auth')->group(function () {
         Route::post('/announcement', [AdminController::class, 'postAnnouncement'])->name('admin.announcement.post');
         Route::delete('/announcement', [AdminController::class, 'clearAnnouncement'])->name('admin.announcement.clear');
         Route::post('/app-release', [AdminController::class, 'postAppRelease'])->name('admin.app_release.post');
+        Route::post('/maintenance', [AdminController::class, 'toggleMaintenance'])->name('admin.maintenance.toggle');
     });
 });

@@ -17,6 +17,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'check.ban'  => \App\Http\Middleware\CheckBanned::class,
         ]);
         $middleware->appendToGroup('web', [
+            \App\Http\Middleware\MaintenanceMode::class,
             \App\Http\Middleware\CheckBanned::class,
         ]);
     })

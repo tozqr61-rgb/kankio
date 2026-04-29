@@ -153,4 +153,13 @@ class AdminController extends Controller
 
         return response()->json(['ok' => true, 'id' => $release->id]);
     }
+
+    public function toggleMaintenance()
+    {
+        $current = \Illuminate\Support\Facades\Cache::get('maintenance_mode', false);
+        $new = !$current;
+        \Illuminate\Support\Facades\Cache::forever('maintenance_mode', $new);
+
+        return response()->json(['maintenance' => $new]);
+    }
 }
