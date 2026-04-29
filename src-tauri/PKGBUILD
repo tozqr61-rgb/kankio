@@ -26,12 +26,13 @@ makedepends=(
 source=()
 
 build() {
-    cd "$srcdir/.."
-    cargo tauri build --bundles none
+    cd "$srcdir/../.."
+    cd src-tauri
+    cargo build --release
 }
 
 package() {
-    cd "$srcdir/.."
+    cd "$srcdir/../.."
 
     # Binary
     install -Dm755 "src-tauri/target/release/kankio-desktop" \

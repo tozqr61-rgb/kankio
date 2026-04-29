@@ -54,16 +54,32 @@
                 <p class="text-xs" style="color:rgba(255,255,255,0.35)">{{ auth()->user()->email }}</p>
             </div>
 
-            <!-- Warning -->
-            <div class="w-full rounded-lg p-3 flex items-start gap-3" style="background:rgba(244,63,94,0.08);border:1px solid rgba(244,63,94,0.18)">
-                <svg class="h-4 w-4 mt-0.5 shrink-0" style="color:rgba(251,113,133,1)" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                </svg>
-                <p class="text-xs leading-relaxed" style="color:rgba(253,164,175,0.8)">
-                    <span class="font-bold" style="color:rgba(251,113,133,1)">Dikkat:</span>
-                    Profil fotoğrafınızı haftada sadece <span class="underline" style="text-decoration-color:rgba(244,63,94,0.5)">1 kez</span> değiştirebilirsiniz.
-                </p>
+            <!-- App Download (Eski uyarı yerine) -->
+            @php $latestApp = \App\Models\AppRelease::latest()->first(); @endphp
+            @if($latestApp)
+            <div class="w-full rounded-xl p-4 flex flex-col gap-2" style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.18)">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <svg class="h-5 w-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                        </svg>
+                        <span class="font-bold text-emerald-400 text-sm">Kankio Android Uygulaması</span>
+                    </div>
+                    <span class="text-xs px-2 py-0.5 rounded-full font-bold" style="background:rgba(16,185,129,0.2);color:rgba(16,185,129,1)">v{{ $latestApp->version }}</span>
+                </div>
+                @if($latestApp->notes)
+                <p class="text-xs opacity-70 mb-1" style="color:rgba(167,243,208,1)">{{ $latestApp->notes }}</p>
+                @endif
+                <a href="{{ $latestApp->direct_download_link }}" download class="w-full mt-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all"
+                   style="background:rgba(16,185,129,1);color:#fff"
+                   onmouseover="this.style.background='rgba(5,150,105,1)'" onmouseout="this.style.background='rgba(16,185,129,1)'">
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Hemen İndir (APK)
+                </a>
             </div>
+            @endif
 
             <input type="file" x-ref="fileInput" class="hidden" accept="image/*" @change="handleAvatarChange">
 

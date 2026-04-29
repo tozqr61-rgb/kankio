@@ -78,6 +78,45 @@
         </div>
     </div>
 
+    <!-- Uygulama Yayınlama -->
+    <div class="mt-8 pt-6 border-t border-white/10">
+        <h2 class="text-xl font-bold tracking-tight mb-4 text-white">📱 Android Uygulama Yayınla</h2>
+        <div class="max-w-xl p-6 border rounded-2xl space-y-4" style="background:rgba(255,255,255,0.03);border-color:rgba(255,255,255,0.07)">
+            @php $latestApp = \App\Models\AppRelease::latest()->first(); @endphp
+            @if($latestApp)
+            <div class="flex items-center gap-3 p-3 rounded-xl text-sm" style="background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.3);color:rgba(167,243,208,1)">
+                <span class="shrink-0 mt-0.5">✅</span>
+                <div class="flex-1 min-w-0">
+                    <p class="font-medium mb-0.5">Aktif Sürüm: v{{ $latestApp->version }}</p>
+                    <p class="opacity-80 break-words text-xs">Drive: {{ $latestApp->drive_link }}</p>
+                </div>
+            </div>
+            @endif
+
+            <div class="space-y-3">
+                <input type="text" x-model="app.version" placeholder="Sürüm (Örn: 1.0.0)"
+                    class="w-full rounded-xl px-3 py-2 text-sm outline-none placeholder-zinc-600"
+                    style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:#fff">
+
+                <input type="url" x-model="app.drive_link" placeholder="Google Drive Linki (https://drive.google.com/file/d/.../view)"
+                    class="w-full rounded-xl px-3 py-2 text-sm outline-none placeholder-zinc-600"
+                    style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:#fff">
+
+                <textarea x-model="app.notes" rows="2" placeholder="Sürüm Notları (Yenilikler vb.)"
+                    class="w-full rounded-xl px-3 py-2 text-sm resize-none outline-none placeholder-zinc-600"
+                    style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:#fff"></textarea>
+
+                <button @click="postAppRelease()" :disabled="!app.version.trim() || !app.drive_link.trim()"
+                    class="w-full py-2 rounded-xl text-sm font-semibold transition-all disabled:opacity-30"
+                    style="background:rgba(16,185,129,0.2);color:#fff"
+                    onmouseover="if(!this.disabled)this.style.background='rgba(16,185,129,0.3)'" onmouseout="if(!this.disabled)this.style.background='rgba(16,185,129,0.2)'">
+                    <span x-show="!app.sending">🚀 Uygulamayı Güncelle</span>
+                    <span x-show="app.sending">Yükleniyor...</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Maintenance -->
     <div class="mt-8 pt-6 border-t border-white/10">
         <h2 class="text-xl font-bold tracking-tight mb-4 text-red-500">Sistem Temizliği</h2>
@@ -118,6 +157,20 @@ function adminDashboard() {
     return {
         cleaningOld: false, cleaningAll: false,
         ann: { message: '', type: 'info', expires_at: '', sending: false },
+        app: { version: '', drive_link: '', notes: '', sending: false },
+
+        async postAppRelease() {
+            if (!this.app.version.trim() || !this.app.drive_link.trim()) return;
+            this.app.sending = true;
+            const r = await fetch(`/admin/app-release`, {
+                method: 'POST',
+                headers: { 'X-CSRF-TOKEN': CSRF, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ version: this.app.version, drive_link: this.app.drive_link, notes: this.app.notes }),
+            });
+            this.app.sending = false;
+            if (r.ok) { showToast('Uygulama başarıyla güncellendi'); location.reload(); }
+            else { const d = await r.json(); showToast(d.message || 'Hata oluştu', 'error'); }
+        },
 
         async postAnnouncement() {
             if (!this.ann.message.trim()) return;

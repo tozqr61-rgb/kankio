@@ -1,7 +1,10 @@
+use tauri::Manager;
+
+#[cfg(desktop)]
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, WindowEvent,
+    AppHandle, WindowEvent,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -9,21 +12,33 @@ use tauri::{
 // ─────────────────────────────────────────────────────────────────────────────
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_notification::init());
+
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
+    }
+
+    builder
         .setup(|app| {
-            build_tray(app)?;
-            register_shortcuts(app)?;
+            #[cfg(desktop)]
+            {
+                build_tray(app)?;
+                register_shortcuts(app)?;
+            }
             inject_performance_tweaks(app)?;
+            allow_media_permissions(app);
             Ok(())
         })
-        // ── Close button → minimize to tray, NOT quit ──────────────────────
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+        .on_window_event(|_window, _event| {
+            #[cfg(desktop)]
+            {
+                if let WindowEvent::CloseRequested { api, .. } = _event {
+                    api.prevent_close();
+                    let _ = _window.hide();
+                }
             }
         })
         .run(tauri::generate_context!())
@@ -51,8 +66,9 @@ fn inject_performance_tweaks(app: &mut tauri::App) -> tauri::Result<()> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// System Tray
+// System Tray (Desktop Only)
 // ─────────────────────────────────────────────────────────────────────────────
+#[cfg(desktop)]
 fn build_tray(app: &mut tauri::App) -> tauri::Result<()> {
     let show_item = MenuItem::with_id(app, "show", "Odaya Dön", true, None::<&str>)?;
     let sep       = PredefinedMenuItem::separator(app)?;
@@ -86,6 +102,7 @@ fn build_tray(app: &mut tauri::App) -> tauri::Result<()> {
 }
 
 /// Show, restore and focus the main window.
+#[cfg(desktop)]
 fn bring_to_front(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
@@ -95,8 +112,9 @@ fn bring_to_front(app: &AppHandle) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Global Shortcuts
+// Global Shortcuts (Desktop Only)
 // ─────────────────────────────────────────────────────────────────────────────
+#[cfg(desktop)]
 fn register_shortcuts(app: &mut tauri::App) -> tauri::Result<()> {
     use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
@@ -117,4 +135,28 @@ fn register_shortcuts(app: &mut tauri::App) -> tauri::Result<()> {
     });
 
     Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WebKit2GTK: auto-grant media capture permissions (mic / camera)
+// ─────────────────────────────────────────────────────────────────────────────
+fn allow_media_permissions(app: &mut tauri::App) {
+    #[cfg(target_os = "linux")]
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.with_webview(|webview| {
+            use webkit2gtk::prelude::*;
+            use webkit2gtk::PermissionRequestExt;
+            if let Some(wk) = webview.inner().dynamic_cast_ref::<webkit2gtk::WebView>() {
+                wk.connect_permission_requested(|_, request| {
+                    if request.is::<webkit2gtk::MediaKeySystemPermissionRequest>()
+                        || request.is::<webkit2gtk::UserMediaPermissionRequest>()
+                    {
+                        request.allow();
+                        return glib::signal::Inhibit(true);
+                    }
+                    glib::signal::Inhibit(false)
+                });
+            }
+        });
+    }
 }

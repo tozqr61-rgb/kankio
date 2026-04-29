@@ -85,5 +85,6 @@ Route::middleware('auth')->group(function () {
         Route::post('/clean/all', [AdminController::class, 'cleanAllMessages'])->name('admin.clean.all');
         Route::post('/announcement', [AdminController::class, 'postAnnouncement'])->name('admin.announcement.post');
         Route::delete('/announcement', [AdminController::class, 'clearAnnouncement'])->name('admin.announcement.clear');
+        Route::post('/app-release', [AdminController::class, 'postAppRelease'])->name('admin.app_release.post');
     });
 });

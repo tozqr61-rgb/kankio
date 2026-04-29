@@ -136,4 +136,21 @@ class AdminController extends Controller
         Announcement::clearCache();
         return response()->json(['ok' => true]);
     }
+
+    public function postAppRelease(Request $request)
+    {
+        $request->validate([
+            'version'    => 'required|string|max:50',
+            'drive_link' => 'required|url',
+            'notes'      => 'nullable|string|max:1000',
+        ]);
+
+        $release = \App\Models\AppRelease::create([
+            'version'    => $request->version,
+            'drive_link' => $request->drive_link,
+            'notes'      => $request->notes,
+        ]);
+
+        return response()->json(['ok' => true, 'id' => $release->id]);
+    }
 }
