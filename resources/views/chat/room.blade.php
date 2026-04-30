@@ -2210,20 +2210,49 @@ function chatRoom() {
             };
             if (this._ytIframe) this._ytCmd('pauseVideo');
             this._playerMuted = true;
+            KankioVoiceRuntime.lastAppliedMicEnabled = null;
         },
 
         async _disconnectLocalVoice(notifyServer) {
             this._speakingUsers = {};
-            resetVoiceRuntime();
+
             const room = getVoiceRoom();
             if (room) {
-                try { await room.disconnect(); } catch(e) {}
-                setVoiceRoom(null);
+                try {
+                    const localParticipant = room.localParticipant;
+                    if (localParticipant) {
+                        try {
+                            await localParticipant.setMicrophoneEnabled(false);
+                        } catch (e) {
+                            console.warn('[voice] failed to disable microphone before disconnect', e);
+                        }
+                        const trackPubs = Array.from(localParticipant.trackPublications.values?.() || []);
+                        for (const pub of trackPubs) {
+                            try {
+                                if (pub?.kind === 'audio') {
+                                    const track = pub.track;
+                                    try { await localParticipant.unpublishTrack(track); } catch (e) {}
+                                    try { track?.stop?.(); } catch (e) {}
+                                }
+                            } catch (e) {}
+                        }
+                    }
+                    await room.disconnect();
+                } catch (e) {
+                    console.warn('[voice] room disconnect failed', e);
+                }
             }
+
             for (const uid in KankioVoiceRuntime.audioEls) {
-                if (KankioVoiceRuntime.audioEls[uid]) KankioVoiceRuntime.audioEls[uid].remove();
+                if (KankioVoiceRuntime.audioEls[uid]) {
+                    try { KankioVoiceRuntime.audioEls[uid].remove(); } catch (e) {}
+                }
             }
             KankioVoiceRuntime.audioEls = {};
+
+            resetVoiceRuntime();
+            setVoiceRoom(null);
+
             if (notifyServer && this._voiceRoomId) {
                 fetch(`/api/voice/${this._voiceRoomId}/leave`, {
                     method: 'POST', headers: { 'X-CSRF-TOKEN': CSRF }
