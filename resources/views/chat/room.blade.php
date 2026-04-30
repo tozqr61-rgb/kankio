@@ -1010,6 +1010,24 @@ const BROADCAST_CONFIG = {!! json_encode([
     ],
 ]) !!};
 
+/* LiveKit runtime — NOT inside Alpine reactive state to avoid DataCloneError
+   when LiveKit SDK internally calls structuredClone on proxied objects. */
+const KankioVoiceRuntime = {
+    lkRoom: null,
+    audioEls: {},
+    micToggleInFlight: false,
+    lastAppliedMicEnabled: null,
+};
+
+function getVoiceRoom() { return KankioVoiceRuntime.lkRoom; }
+function setVoiceRoom(room) { KankioVoiceRuntime.lkRoom = room; }
+function resetVoiceRuntime() {
+    KankioVoiceRuntime.lkRoom = null;
+    KankioVoiceRuntime.audioEls = {};
+    KankioVoiceRuntime.micToggleInFlight = false;
+    KankioVoiceRuntime.lastAppliedMicEnabled = null;
+}
+
 function chatRoom() {
     return {
         /* Chat state */
@@ -1093,15 +1111,11 @@ function chatRoom() {
             settings: {}, participants: []
         },
         _voiceRoomId: null,   /* room where voice is LOCKED — never changes during navigation */
-        _lkRoom: null,        /* LiveKit Room instance */
-        _audioEls: {},        /* { userId: HTMLAudioElement } */
         _voiceTimer: null,
         _manualVoiceLeave: false,
         _voiceReconnectAttempts: 0,
         _voiceReconnectTimer: null,
         _voiceJoinInFlight: false,      /* prevents concurrent voiceJoin() races */
-        _micToggleInFlight: false,      /* prevents concurrent setMicrophoneEnabled() calls */
-        _lastAppliedMicEnabled: null, /* dedup mic state applications */
         voiceConnectionStatus: 'idle', /* idle | connecting | connected | reconnecting | failed */
         voicePrefs: { noiseSuppression: true, echoCancellation: true, pushToTalk: false, lowBandwidth: false },
         _pttDown: false,
@@ -1501,7 +1515,8 @@ function chatRoom() {
                     /* Re-sync music state */
                     this._syncMusic();
                     /* Re-create broken voice connections */
-                    if (this.voiceState.in_voice && this._lkRoom && this._lkRoom.state === 'disconnected') {
+                    const room = getVoiceRoom();
+                    if (this.voiceState.in_voice && room && room.state === 'disconnected') {
                         this._scheduleVoiceReconnect();
                     }
                     this.connected = true;
@@ -2043,7 +2058,7 @@ function chatRoom() {
                 console.log('[voice] voiceJoin rejected: status=' + this.voiceConnectionStatus);
                 return;
             }
-            if (this._lkRoom && this.voiceState?.in_voice && !isReconnect) {
+            if (getVoiceRoom() && this.voiceState?.in_voice && !isReconnect) {
                 console.log('[voice] voiceJoin rejected: already connected and in_voice');
                 return;
             }
@@ -2112,37 +2127,39 @@ function chatRoom() {
             const Room = LivekitClient.Room;
             const RoomEvent = LivekitClient.RoomEvent;
 
-            if (this._lkRoom) {
-                const shouldDisconnect = options.forceReconnect || this._lkRoom.state === 'disconnected' || !this._lkRoom.localParticipant;
+            const existingRoom = getVoiceRoom();
+            if (existingRoom) {
+                const shouldDisconnect = options.forceReconnect || existingRoom.state === 'disconnected' || !existingRoom.localParticipant;
                 if (shouldDisconnect) {
-                    console.log('[voice] _connectLiveKit: disconnecting existing room. state=' + this._lkRoom.state);
-                    try { await this._lkRoom.disconnect(); } catch(e) {}
-                    this._lkRoom = null;
+                    console.log('[voice] _connectLiveKit: disconnecting existing room. state=' + existingRoom.state);
+                    try { await existingRoom.disconnect(); } catch(e) {}
+                    setVoiceRoom(null);
                 } else {
-                    console.log('[voice] _connectLiveKit: reusing healthy room. state=' + this._lkRoom.state);
+                    console.log('[voice] _connectLiveKit: reusing healthy room. state=' + existingRoom.state);
                     return;
                 }
             }
 
-            this._lkRoom = new Room({ adaptiveStream: true, dynacast: true });
+            const room = new Room({ adaptiveStream: true, dynacast: true });
+            setVoiceRoom(room);
 
-            this._lkRoom.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+            room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
                 if (track.kind !== 'audio') return;
                 const el = track.attach();
                 el.muted = !!this.voiceState.is_deafened;
-                this._audioEls[participant.identity] = el;
+                KankioVoiceRuntime.audioEls[participant.identity] = el;
             });
 
-            this._lkRoom.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
+            room.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
                 if (track.kind !== 'audio') return;
                 track.detach();
-                if (this._audioEls[participant.identity]) {
-                    this._audioEls[participant.identity].remove();
-                    delete this._audioEls[participant.identity];
+                if (KankioVoiceRuntime.audioEls[participant.identity]) {
+                    KankioVoiceRuntime.audioEls[participant.identity].remove();
+                    delete KankioVoiceRuntime.audioEls[participant.identity];
                 }
             });
 
-            this._lkRoom.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+            room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
                 const speakingDict = {};
                 for (const p of speakers) speakingDict[p.identity] = true;
                 this._speakingUsers = speakingDict;
@@ -2150,33 +2167,33 @@ function chatRoom() {
             });
 
             if (RoomEvent.ConnectionQualityChanged) {
-                this._lkRoom.on(RoomEvent.ConnectionQualityChanged, (quality, participant) => {
+                room.on(RoomEvent.ConnectionQualityChanged, (quality, participant) => {
                     if (participant && participant.identity !== String(this.currentUser.id)) return;
                     this._sendVoiceQuality(this._mapLiveKitQuality(quality));
                 });
             }
 
             if (RoomEvent.Reconnecting) {
-                this._lkRoom.on(RoomEvent.Reconnecting, () => {
+                room.on(RoomEvent.Reconnecting, () => {
                     this.voiceConnectionStatus = 'reconnecting';
                     this._sendVoiceQuality('poor', true);
                 });
             }
 
             if (RoomEvent.Reconnected) {
-                this._lkRoom.on(RoomEvent.Reconnected, () => {
+                room.on(RoomEvent.Reconnected, () => {
                     this.voiceConnectionStatus = 'connected';
                     this._sendVoiceQuality('good', true);
                 });
             }
 
-            this._lkRoom.on(RoomEvent.Disconnected, () => {
+            room.on(RoomEvent.Disconnected, () => {
                 if (this._manualVoiceLeave) return;
                 this.voiceConnectionStatus = 'reconnecting';
                 this._scheduleVoiceReconnect();
             });
 
-            await this._lkRoom.connect(state.livekit_url, state.livekit_token);
+            await room.connect(state.livekit_url, state.livekit_token);
             await this._applyLocalMicState();
         },
 
@@ -2197,16 +2214,16 @@ function chatRoom() {
 
         async _disconnectLocalVoice(notifyServer) {
             this._speakingUsers = {};
-            this._lastAppliedMicEnabled = null;
-            this._micToggleInFlight = false;
-            if (this._lkRoom) {
-                try { await this._lkRoom.disconnect(); } catch(e) {}
-                this._lkRoom = null;
+            resetVoiceRuntime();
+            const room = getVoiceRoom();
+            if (room) {
+                try { await room.disconnect(); } catch(e) {}
+                setVoiceRoom(null);
             }
-            for (const uid in this._audioEls) {
-                if (this._audioEls[uid]) this._audioEls[uid].remove();
+            for (const uid in KankioVoiceRuntime.audioEls) {
+                if (KankioVoiceRuntime.audioEls[uid]) KankioVoiceRuntime.audioEls[uid].remove();
             }
-            this._audioEls = {};
+            KankioVoiceRuntime.audioEls = {};
             if (notifyServer && this._voiceRoomId) {
                 fetch(`/api/voice/${this._voiceRoomId}/leave`, {
                     method: 'POST', headers: { 'X-CSRF-TOKEN': CSRF }
@@ -2361,33 +2378,36 @@ function chatRoom() {
         },
 
         async _applyLocalMicState() {
-            if (!this._lkRoom?.localParticipant) {
+            const room = getVoiceRoom();
+            if (!room?.localParticipant) {
                 console.log('[voice] _applyLocalMicState skipped: no localParticipant');
                 return;
             }
             const shouldMute = !!this.voiceState.is_muted || !this.voiceState.can_speak || (this.voicePrefs.pushToTalk && !this._pttDown);
-            if (this._lastAppliedMicEnabled === shouldMute) {
+            if (KankioVoiceRuntime.lastAppliedMicEnabled === shouldMute) {
                 console.log('[voice] _applyLocalMicState dedup: already ' + shouldMute);
                 return;
             }
-            this._lastAppliedMicEnabled = shouldMute;
+            KankioVoiceRuntime.lastAppliedMicEnabled = shouldMute;
             await this._setLocalMicMuted(shouldMute, false);
         },
 
         async _setLocalMicMuted(muted, updateState = true) {
             if (updateState) this.voiceState.is_muted = muted;
-            if (!this._lkRoom?.localParticipant) {
+            const room = getVoiceRoom();
+            const localParticipant = room?.localParticipant;
+            if (!localParticipant) {
                 console.log('[voice] _setLocalMicMuted skipped: no localParticipant');
                 return;
             }
-            if (this._micToggleInFlight) {
+            if (KankioVoiceRuntime.micToggleInFlight) {
                 console.log('[voice] _setLocalMicMuted skipped: toggle already in flight');
                 return;
             }
-            this._micToggleInFlight = true;
+            KankioVoiceRuntime.micToggleInFlight = true;
             try {
                 console.log('[voice] _setLocalMicMuted: enabled=' + !muted);
-                await this._lkRoom.localParticipant.setMicrophoneEnabled(!muted, {
+                await localParticipant.setMicrophoneEnabled(!muted, {
                     echoCancellation: !!this.voicePrefs.echoCancellation,
                     noiseSuppression: !!this.voicePrefs.noiseSuppression,
                     autoGainControl: true,
@@ -2397,16 +2417,16 @@ function chatRoom() {
                 });
             } catch(e) {
                 console.warn('[voice] _setLocalMicMuted error:', e);
-                this._lastAppliedMicEnabled = null; /* allow retry on failure */
+                KankioVoiceRuntime.lastAppliedMicEnabled = null; /* allow retry on failure */
             } finally {
-                this._micToggleInFlight = false;
+                KankioVoiceRuntime.micToggleInFlight = false;
             }
         },
 
         _setRemoteAudioMuted(muted) {
             this.voiceState.is_deafened = muted;
-            for (const uid in this._audioEls) {
-                this._audioEls[uid].muted = muted;
+            for (const uid in KankioVoiceRuntime.audioEls) {
+                KankioVoiceRuntime.audioEls[uid].muted = muted;
             }
         },
 
