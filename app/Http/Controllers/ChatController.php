@@ -112,6 +112,42 @@ class ChatController extends Controller
         ]);
     }
 
+    public function bootstrap(Request $request, $roomId)
+    {
+        $user = Auth::user();
+        $room = Room::findOrFail($roomId);
+
+        if (! $this->canAccessRoom($room, $user)) {
+            return response()->json(['error' => 'Erişim reddedildi'], 403);
+        }
+
+        $messages = Message::where('room_id', $roomId)
+            ->where('is_archived', false)
+            ->with(['sender', 'replyToMessage.sender'])
+            ->orderBy('created_at', 'desc')
+            ->limit(100)
+            ->get()
+            ->reverse()
+            ->values();
+
+        \DB::table('room_reads')->updateOrInsert(
+            ['user_id' => $user->id, 'room_id' => $roomId],
+            ['last_read_at' => now()]
+        );
+
+        return response()->json([
+            'room' => [
+                'id' => $room->id,
+                'name' => $room->name,
+                'type' => $room->type,
+            ],
+            'messages' => $messages->map(function ($m) {
+                return $this->formatMessage($m);
+            })->values()->toArray(),
+            'archived_count' => Message::where('room_id', $roomId)->where('is_archived', true)->count(),
+        ]);
+    }
+
     public function poll(Request $request, $roomId)
     {
         $user = Auth::user();

@@ -379,7 +379,7 @@ function unlockAudio(btn) {
                 </div>
                 <div>
                     <p class="text-base font-medium text-white" x-text="voiceState.in_voice ? 'Ses Kanalındasınız' : 'Ses Kanalı'"></p>
-                    <p class="text-xs text-zinc-500" x-text="(voiceState.participants?.length || 0) + ' katılımcı'"></p>
+                    <p class="text-xs text-zinc-500" x-text="voiceParticipantCount() + ' katılımcı'"></p>
                     <p x-show="voiceState.in_voice" class="text-[10px] mt-0.5"
                        :style="voiceConnectionStatus === 'reconnecting' ? 'color:rgba(251,191,36,1)' : 'color:rgba(113,113,122,1)'"
                        x-text="voiceConnectionStatus === 'reconnecting' ? 'Yeniden bağlanıyor...' : ('Kalite: ' + qualityLabel(voiceState.connection_quality))"></p>
@@ -449,12 +449,12 @@ function unlockAudio(btn) {
         </div>
 
         <!-- Participants grid (same as desktop but full-width) -->
-        <div x-show="voiceState.participants && voiceState.participants.length > 0" class="space-y-3">
+        <div x-show="voiceParticipantCount() > 0" class="space-y-3">
             <p class="text-[11px] uppercase tracking-widest text-zinc-500">
-                Ses Kanalı &mdash; <span x-text="voiceState.participants?.length || 0"></span> kişi
+                Ses Kanalı &mdash; <span x-text="voiceParticipantCount()"></span> kişi
             </p>
             <div class="grid grid-cols-3 gap-3">
-                <template x-for="p in (voiceState.participants || [])" :key="p.id">
+                <template x-for="p in voiceParticipants()" :key="p.id">
                     <div class="flex flex-col items-center gap-2 p-4 rounded-2xl relative"
                          :style="_speakingUsers[p.id] && !p.is_muted
                              ? 'background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.3)'
@@ -489,7 +489,7 @@ function unlockAudio(btn) {
             </div>
         </div>
 
-        <p x-show="!voiceState.participants?.length" class="text-center text-xs text-zinc-600 pt-8">
+        <p x-show="voiceParticipantCount() === 0" class="text-center text-xs text-zinc-600 pt-8">
             Henüz kimse ses kanalında değil
         </p>
     </div>
@@ -675,7 +675,7 @@ function unlockAudio(btn) {
                 </div>
                 <div>
                     <p class="text-sm font-medium text-white" x-text="voiceState.in_voice ? 'Ses Kanalındasınız' : 'Ses Kanalı'"></p>
-                    <p class="text-[10px] text-zinc-500" x-text="(voiceState.participants?.length || 0) + ' katılımcı'"></p>
+                    <p class="text-[10px] text-zinc-500" x-text="voiceParticipantCount() + ' katılımcı'"></p>
                     <p x-show="voiceState.in_voice" class="text-[9px]"
                        :style="voiceConnectionStatus === 'reconnecting' ? 'color:rgba(251,191,36,1)' : 'color:rgba(113,113,122,1)'"
                        x-text="voiceConnectionStatus === 'reconnecting' ? 'Yeniden bağlanıyor...' : qualityLabel(voiceState.connection_quality)"></p>
@@ -757,12 +757,12 @@ function unlockAudio(btn) {
         </div>
 
         <!-- Participants -->
-        <div x-show="voiceState.participants && voiceState.participants.length > 0" class="space-y-2">
+        <div x-show="voiceParticipantCount() > 0" class="space-y-2">
             <label class="text-[10px] uppercase tracking-wider text-zinc-500">
-                Ses Kanalı — <span x-text="voiceState.participants?.length || 0"></span> kişi
+                Ses Kanalı — <span x-text="voiceParticipantCount()"></span> kişi
             </label>
             <div class="grid grid-cols-2 gap-2">
-                <template x-for="p in (voiceState.participants || [])" :key="p.id">
+                <template x-for="p in voiceParticipants()" :key="p.id">
                     <div class="flex flex-col items-center gap-1.5 p-3 rounded-xl relative transition-all"
                          :style="_speakingUsers[p.id]
                              ? 'background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.3)'
@@ -873,7 +873,7 @@ function unlockAudio(btn) {
 
         {{-- Participant avatars --}}
         <div class="flex items-center shrink-0" style="--gap:-8px">
-            <template x-for="(p, pi) in (voiceState.participants || []).slice(0, 4)" :key="p.id">
+            <template x-for="(p, pi) in voiceParticipants().slice(0, 4)" :key="p.id">
                 <div class="h-7 w-7 rounded-full border-2 flex items-center justify-center text-[11px] font-bold -ml-2 first:ml-0 transition-all"
                      :style="_speakingUsers[p.id]
                          ? 'background:rgba(16,185,129,0.3);color:rgba(52,211,153,1);border-color:rgba(52,211,153,0.6)'
@@ -886,7 +886,7 @@ function unlockAudio(btn) {
         <div class="flex-1 min-w-0">
             <p class="text-xs font-medium leading-tight"
                :style="voiceState.is_muted ? 'color:rgba(251,191,36,1)' : 'color:rgba(52,211,153,1)'"
-               x-text="voiceState.is_muted ? '🔇 Sessizde' : (musicState.video_id && musicState.is_playing ? '🎵 ' + (musicState.video_title || 'Çalıyor').substring(0,20) : `${voiceState.participants?.length || 0} kişi sesli`)"></p>
+               x-text="voiceState.is_muted ? '🔇 Sessizde' : (musicState.video_id && musicState.is_playing ? '🎵 ' + (musicState.video_title || 'Çalıyor').substring(0,20) : `${voiceParticipantCount()} kişi sesli`)"></p>
         </div>
 
         {{-- Music speaker toggle (mobile) --}}
@@ -1151,6 +1151,15 @@ function chatRoom() {
         _reconnectTimer: null,
 
         init() {
+            const pathMatch = window.location.pathname.match(/\/chat\/(\d+)/);
+            if (pathMatch) {
+                this._roomId = String(pathMatch[1]);
+                ROOM_ID = this._roomId;
+            }
+            if (typeof Alpine !== 'undefined' && Alpine.store('chat')) {
+                Alpine.store('chat').activeRoomId = this._roomId;
+            }
+
             this.messages = INIT_MSGS;
             if (this.messages.length > 0) {
                 this.lastMessageAt = this.messages[this.messages.length - 1].created_at;
@@ -1165,6 +1174,16 @@ function chatRoom() {
 
             /* Expose changeRoom globally for sidebar SPA links */
             window._changeRoom = (id, name) => this.changeRoom(id, name);
+
+            window.addEventListener('popstate', async () => {
+                const m = window.location.pathname.match(/\/chat\/(\d+)/);
+                if (!m) return;
+
+                const roomId = m[1];
+                if (String(roomId) === String(this._roomId)) return;
+
+                await this.changeRoom(roomId, '', { pushState: false });
+            });
 
             /* Pause polling when tab hidden — saves battery/CPU */
             document.addEventListener('visibilitychange', () => {
@@ -1182,8 +1201,72 @@ function chatRoom() {
         },
 
         /* ── Room Transition ── */
-        changeRoom(id, name) {
-            window.location.href = `/chat/${id}`;
+        async changeRoom(id, name, options = {}) {
+            id = String(id);
+            const pushState = options.pushState !== false;
+            if (String(this._roomId) === id) return;
+
+            try {
+                this.connected = false;
+                this._leaveRoomRealtimeChannels();
+
+                const r = await fetch(`/api/chat/${id}/bootstrap`, {
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                    }
+                });
+
+                if (!r.ok) {
+                    showToast('Oda yüklenemedi', 'error');
+                    this.connected = true;
+                    this._joinRoomRealtimeChannels();
+                    return;
+                }
+
+                const data = await r.json();
+
+                this._roomId = String(data.room?.id || id);
+                this._roomName = data.room?.name || name || this._roomName;
+                this.roomType = data.room?.type || this.roomType;
+                ROOM_ID = this._roomId;
+                if (typeof Alpine !== 'undefined' && Alpine.store('chat')) {
+                    Alpine.store('chat').activeRoomId = this._roomId;
+                }
+
+                this.messages = Array.isArray(data.messages) ? data.messages : [];
+                this.lastMessageAt = this.messages.length
+                    ? this.messages[this.messages.length - 1].created_at
+                    : null;
+
+                this.archivedMessages = [];
+                this.archivedPage = 1;
+                this.archivedHasMore = false;
+                this.archivedCount = data.archived_count || 0;
+                this.archivedLoading = false;
+                this.showArchived = false;
+
+                this.typingUsers = {};
+                this.replyingTo = null;
+                this.inputValue = '';
+                this.announcementTitle = '';
+                this.mobileTab = 'chat';
+                this.connected = true;
+
+                if (pushState) {
+                    window.history.pushState({}, '', `/chat/${this._roomId}`);
+                }
+
+                this._joinRoomRealtimeChannels();
+
+                this.$nextTick(() => this.scrollToBottom());
+                this._schedulePoll(300);
+            } catch (e) {
+                console.error('[room] changeRoom failed', e);
+                showToast('Oda değiştirilemedi', 'error');
+                this.connected = true;
+                this._joinRoomRealtimeChannels();
+            }
         },
 
 
@@ -1222,7 +1305,8 @@ function chatRoom() {
                 }
 
                 /* Messages */
-                const url = `/api/chat/${ROOM_ID}/messages${this.lastMessageAt ? '?since='+encodeURIComponent(this.lastMessageAt) : ''}`;
+                const activeRoomId = String(this._roomId || ROOM_ID);
+                const url = `/api/chat/${activeRoomId}/messages${this.lastMessageAt ? '?since=' + encodeURIComponent(this.lastMessageAt) : ''}`;
                 const r = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
                 if (!r.ok) { this.connected = false; this._schedulePoll(5000); return; }
                 /* If session expired, server returns login page HTML instead of JSON */
@@ -1603,47 +1687,75 @@ function chatRoom() {
                 });
                 window.KANKIO_ECHO = this._echo;
 
-                /* Chat events: realtime primary; polling remains only as a quiet fallback */
-                this._echo.private(`room.${ROOM_ID}.chat`)
-                    .listen('.message.sent', ({ message }) => {
-                        this._appendRealtimeMessage(message);
-                    })
-                    .listen('.message.deleted', ({ message_id }) => {
-                        this.messages = this.messages.filter(m => String(m.id) !== String(message_id));
-                    })
-                    .listen('.typing', ({ user, is_typing }) => {
-                        this._applyTyping(user, is_typing);
-                    })
-                    .listen('.messages.read', ({ reader_id, message_ids }) => {
-                        this._applyReadReceipt(reader_id, message_ids);
-                    });
-
-                /* Music state push */
-                this._echo.private(`room.${ROOM_ID}.music`)
-                    .listen('.music.state', (state) => {
-                        this.musicState = state;
-                        this._applyMusicState(state);
-                    });
-
-                /* Voice state push (participants list — join/leave events only) */
-                this._echo.private(`room.${ROOM_ID}.voice`)
-                    .listen('.voice.state', (data) => {
-                        this._applyVoiceState({
-                            participants: data.participants || [],
-                            settings: data.settings || this.voiceState.settings
-                        });
-                    })
-                    .listen('.voice.participant', ({ action, participant }) => {
-                        this._applyVoiceParticipant(action, participant);
-                    })
-                    /* Lightweight mute patch — updates ONE participant, no full re-render */
-                    .listen('.voice.mute', ({ user_id, is_muted }) => {
-                        this._applyVoiceParticipant('updated', { id: user_id, is_muted });
-                    });
-
+                this._joinRoomRealtimeChannels();
                 this._realtimeReady = true;
 
-            } catch(e) { /* Reverb not running — polling/DB fallback */ }
+            } catch(e) {
+                console.warn('[echo] init failed, polling fallback active', e);
+            }
+        },
+
+        _leaveRoomRealtimeChannels() {
+            if (!this._echo) return;
+
+            const roomId = String(this._roomId || '');
+            if (!roomId) return;
+
+            try { this._echo.leave(`private-room.${roomId}.chat`); } catch (_) {}
+            try { this._echo.leave(`private-room.${roomId}.music`); } catch (_) {}
+            try { this._echo.leave(`private-room.${roomId}.voice`); } catch (_) {}
+
+            try { this._echo.leave(`room.${roomId}.chat`); } catch (_) {}
+            try { this._echo.leave(`room.${roomId}.music`); } catch (_) {}
+            try { this._echo.leave(`room.${roomId}.voice`); } catch (_) {}
+        },
+
+        _joinRoomRealtimeChannels() {
+            if (!this._echo) return;
+
+            const roomId = String(this._roomId || '');
+            if (!roomId) return;
+
+            /* Chat events: realtime primary; polling remains only as a quiet fallback */
+            this._echo.private(`room.${roomId}.chat`)
+                .listen('.message.sent', ({ message }) => {
+                    this._appendRealtimeMessage(message);
+                })
+                .listen('.message.deleted', ({ message_id }) => {
+                    this.messages = this.messages.filter(m => String(m.id) !== String(message_id));
+                })
+                .listen('.typing', ({ user, is_typing }) => {
+                    this._applyTyping(user, is_typing);
+                })
+                .listen('.messages.read', ({ reader_id, message_ids }) => {
+                    this._applyReadReceipt(reader_id, message_ids);
+                });
+
+            /* Music state push */
+            this._echo.private(`room.${roomId}.music`)
+                .listen('.music.state', (state) => {
+                    this.musicState = state;
+                    this._applyMusicState(state);
+                });
+
+            /* Voice state push updates the visible room only; LiveKit stays locked to _voiceRoomId. */
+            this._echo.private(`room.${roomId}.voice`)
+                .listen('.voice.state', (data) => {
+                    if (String(this._voiceRoomId || '') !== String(this._roomId || '')) return;
+
+                    this._applyVoiceState({
+                        participants: data.participants || [],
+                        settings: data.settings || this.voiceState.settings
+                    });
+                })
+                .listen('.voice.participant', ({ action, participant }) => {
+                    if (String(this._voiceRoomId || '') !== String(this._roomId || '')) return;
+                    this._applyVoiceParticipant(action, participant);
+                })
+                .listen('.voice.mute', ({ user_id, is_muted }) => {
+                    if (String(this._voiceRoomId || '') !== String(this._roomId || '')) return;
+                    this._applyVoiceParticipant('updated', { id: user_id, is_muted });
+                });
         },
 
         _initYT() {
@@ -2033,7 +2145,7 @@ function chatRoom() {
         async loadArchived(page = 1) {
             this.archivedLoading = true;
             try {
-                const r = await fetch(`/api/chat/${ROOM_ID}/archived?page=${page}`);
+                const r = await fetch(`/api/chat/${this._roomId}/archived?page=${page}`);
                 if (!r.ok) return;
                 const data = await r.json();
                 if (page === 1) this.archivedMessages = data.messages;
@@ -2056,7 +2168,7 @@ function chatRoom() {
 
                 this.messages.forEach(m => { if (unread.includes(m.id)) m._seen = true; });
 
-                fetch(`/api/chat/${ROOM_ID}/seen`, {
+                fetch(`/api/chat/${this._roomId}/seen`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
                     body: JSON.stringify({ message_ids: unread })
@@ -2401,6 +2513,19 @@ function chatRoom() {
             this._refreshSpeakingUsers();
             this._applyLocalMicState();
             this._setRemoteAudioMuted(!!this.voiceState.is_deafened);
+        },
+
+        isViewingVoiceRoom() {
+            return String(this._voiceRoomId || '') === String(this._roomId || '');
+        },
+
+        voiceParticipants() {
+            if (!this.isViewingVoiceRoom()) return [];
+            return this.voiceState.participants || [];
+        },
+
+        voiceParticipantCount() {
+            return this.voiceParticipants().length;
         },
 
         _applyVoiceParticipant(action, participant) {

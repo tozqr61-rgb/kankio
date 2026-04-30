@@ -40,6 +40,7 @@ Route::middleware('auth')->group(function () {
 
     // Chat API (Realtime primary, polling fallback)
     Route::get('/api/chat/{roomId}/messages', [ChatController::class, 'poll'])->name('api.poll');
+    Route::get('/api/chat/{roomId}/bootstrap', [ChatController::class, 'bootstrap'])->name('api.chat.bootstrap');
     Route::post('/api/chat/{roomId}/messages', [MessageController::class, 'store'])->name('api.message.store');
     Route::delete('/api/chat/{roomId}/messages/{messageId}', [MessageController::class, 'destroy'])->name('api.message.destroy');
     Route::post('/api/chat/{roomId}/seen', [ChatController::class, 'markSeen'])->name('api.message.seen');

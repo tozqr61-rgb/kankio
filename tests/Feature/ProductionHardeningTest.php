@@ -40,6 +40,55 @@ class ProductionHardeningTest extends TestCase
             ->assertOk();
     }
 
+    public function test_should_bootstrap_room_messages_when_room_is_accessible(): void
+    {
+        $user = User::factory()->create();
+        $room = Room::create(['name' => 'Bootstrap', 'type' => 'global', 'created_by' => $user->id]);
+
+        Message::create([
+            'room_id' => $room->id,
+            'sender_id' => $user->id,
+            'content' => 'Visible message',
+        ]);
+
+        $archivedMessage = Message::create([
+            'room_id' => $room->id,
+            'sender_id' => $user->id,
+            'content' => 'Archived message',
+        ]);
+        $archivedMessage->forceFill(['is_archived' => true])->save();
+
+        $this->actingAs($user)
+            ->getJson(route('api.chat.bootstrap', $room->id))
+            ->assertOk()
+            ->assertJsonPath('room.id', $room->id)
+            ->assertJsonPath('room.name', 'Bootstrap')
+            ->assertJsonPath('archived_count', 1)
+            ->assertJsonCount(1, 'messages')
+            ->assertJsonPath('messages.0.content', 'Visible message');
+
+        $this->assertDatabaseHas('room_reads', [
+            'user_id' => $user->id,
+            'room_id' => $room->id,
+        ]);
+    }
+
+    public function test_should_return403_when_bootstrap_private_room_access_denied(): void
+    {
+        $owner = User::factory()->create();
+        $outsider = User::factory()->create();
+
+        $room = Room::create([
+            'name' => 'Private Bootstrap',
+            'type' => 'private',
+            'created_by' => $owner->id,
+        ]);
+
+        $this->actingAs($outsider)
+            ->getJson(route('api.chat.bootstrap', $room->id))
+            ->assertForbidden();
+    }
+
     public function test_should_reject_voice_join_when_user_is_not_private_room_member(): void
     {
         config([

@@ -16,3 +16,18 @@
 - Architectural Foresight:
   - Voice state is now server-authoritative in `voice_sessions`, with client LiveKit events treated as telemetry/state patches.
   - Polling remains as an explicit degraded-mode fallback while the primary product path uses Reverb events.
+
+## 2026-04-30T20:58:39+03:00
+
+- Context:
+  - Converted chat room navigation from full-page reloads to an in-page room bootstrap flow so LiveKit voice runtime can survive switching the viewed room.
+  - Added `/api/chat/{roomId}/bootstrap` for loading room metadata, recent messages, and archived counts without replacing the browser document.
+- Tech Debt & Resolutions:
+  - Split Echo setup from room channel subscription management with explicit leave/join helpers for chat, music, and voice channels.
+  - Moved polling, archived-message loading, and seen tracking to the active `_roomId` instead of the initial page `ROOM_ID`.
+- Observability/Security Impact:
+  - Bootstrap uses the existing room access check and returns 403 JSON for inaccessible rooms.
+  - Echo init failures now emit a console warning while preserving polling fallback behavior.
+- Architectural Foresight:
+  - Viewed room state now changes independently from `_voiceRoomId`, preserving active voice connections while allowing message panels to follow browser history.
+  - Voice participant rendering is scoped to the viewed voice room so navigating away does not present the active call's participant list as the new room's state.
