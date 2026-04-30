@@ -19,6 +19,20 @@
         </div>
     </div>
 
+    <div class="mt-6 pt-6 border-t border-white/10">
+        <h2 class="text-xl font-bold tracking-tight mb-4 text-white">Operasyon Metrikleri</h2>
+        <div class="max-w-3xl rounded-2xl border p-4" style="background:rgba(255,255,255,0.03);border-color:rgba(255,255,255,0.07)">
+            @forelse($metrics as $metric => $value)
+                <div class="flex items-center justify-between gap-4 py-2 border-b border-white/5 last:border-b-0">
+                    <span class="text-xs text-zinc-400 break-all">{{ $metric }}</span>
+                    <span class="text-sm font-semibold text-white">{{ $value }}</span>
+                </div>
+            @empty
+                <p class="text-xs text-zinc-500">Henüz ölçüm yok.</p>
+            @endforelse
+        </div>
+    </div>
+
     <!-- Bakım Modu -->
     <div class="mt-6 pt-6 border-t border-white/10">
         @php $maintenanceOn = \Illuminate\Support\Facades\Cache::get('maintenance_mode', false); @endphp

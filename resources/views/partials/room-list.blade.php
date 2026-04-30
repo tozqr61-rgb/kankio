@@ -219,6 +219,8 @@ function roomListComp() {
     return {
         isActiveUsersOpen: true,
         _unreadTimer: null,
+        _echo: null,
+        _roomIds: @json($rooms->pluck('id')->merge($dms->pluck('id'))->unique()->values()),
 
         get onlineUsers() {
             return (typeof Alpine !== 'undefined' && Alpine.store('chat')) ? Alpine.store('chat').onlineUsers : [];
@@ -243,13 +245,71 @@ function roomListComp() {
             } catch(e) {}
         },
 
+        _initRealtimeUnread() {
+            try {
+                if (!window.LaravelEcho || typeof BROADCAST_DRIVER === 'undefined' || BROADCAST_DRIVER === 'null') return false;
+
+                if (window.KANKIO_ECHO) {
+                    this._echo = window.KANKIO_ECHO;
+                } else {
+                    const cfg = BROADCAST_DRIVER === 'pusher'
+                        ? {
+                            broadcaster: 'pusher',
+                            key: BROADCAST_CONFIG.pusher.key,
+                            cluster: BROADCAST_CONFIG.pusher.cluster,
+                            forceTLS: BROADCAST_CONFIG.pusher.scheme === 'https',
+                            disableStats: true,
+                        }
+                        : {
+                            broadcaster: 'reverb',
+                            key: BROADCAST_CONFIG.reverb.key,
+                            wsHost: BROADCAST_CONFIG.reverb.host,
+                            wsPort: BROADCAST_CONFIG.reverb.port,
+                            wssPort: BROADCAST_CONFIG.reverb.port,
+                            forceTLS: BROADCAST_CONFIG.reverb.scheme === 'https',
+                            disableStats: true,
+                            enabledTransports: ['ws'],
+                        };
+
+                    this._echo = new window.LaravelEcho({
+                        ...cfg,
+                        auth: { headers: { 'X-CSRF-TOKEN': CSRF } },
+                        authEndpoint: `/broadcasting/auth`,
+                    });
+                    window.KANKIO_ECHO = this._echo;
+                }
+
+                for (const roomId of this._roomIds) {
+                    this._echo.private(`room.${roomId}.chat`)
+                        .listen('.message.sent', ({ message }) => {
+                            if (!message || String(message.sender?.id) === String(this.currentUser.id)) return;
+                            if (String(Alpine.store('chat').activeRoomId) === String(roomId)) return;
+                            const counts = { ...Alpine.store('chat').unreadCounts };
+                            counts[roomId] = (counts[roomId] || 0) + 1;
+                            Alpine.store('chat').unreadCounts = counts;
+                        })
+                        .listen('.messages.read', ({ reader_id }) => {
+                            if (String(reader_id) !== String(this.currentUser.id)) return;
+                            const counts = { ...Alpine.store('chat').unreadCounts };
+                            delete counts[roomId];
+                            Alpine.store('chat').unreadCounts = counts;
+                        });
+                }
+
+                return true;
+            } catch(e) {
+                return false;
+            }
+        },
+
         init() {
             window.addEventListener('delete-room', (e) => {
                 if (window._chatLayout) window._chatLayout.deleteRoom(e.detail.id);
                 else window.dispatchEvent(new CustomEvent('toggle-left-sidebar'));
             });
             this._pollUnread();
-            this._unreadTimer = setInterval(() => this._pollUnread(), 5000);
+            const realtimeReady = this._initRealtimeUnread();
+            this._unreadTimer = setInterval(() => this._pollUnread(), realtimeReady ? 60000 : 5000);
         }
     }
 }

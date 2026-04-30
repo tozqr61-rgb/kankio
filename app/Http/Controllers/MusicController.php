@@ -2,17 +2,21 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\MessageSent;
 use App\Events\MusicStateChanged;
 use App\Events\VoiceStateChanged;
 use App\Models\Message;
 use App\Models\RoomMusicState;
+use App\Support\AppMetrics;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class MusicController extends Controller
 {
     private const DJ_BOT_USER_ID = 0;
+
     private const DJ_BOT_USERNAME = '🎵 DJ Bot';
 
     /** Return current music state (with live-computed position).
@@ -38,7 +42,13 @@ class MusicController extends Controller
     {
         try {
             broadcast(new MusicStateChanged($state->room_id, $this->formatState($state)));
-        } catch (\Throwable $e) {}
+        } catch (\Throwable $e) {
+            Log::warning('music.broadcast.state_failed', [
+                'room_id' => $state->room_id,
+                'error' => $e->getMessage(),
+            ]);
+            AppMetrics::increment('external_service_errors_total', ['service' => 'reverb', 'reason' => 'music_state_broadcast']);
+        }
     }
 
     /** Slash command handler — called from chat input */
@@ -88,7 +98,7 @@ class MusicController extends Controller
             $videoId = $this->searchYouTube($query);
         }
         if (! $videoId) {
-            return response()->json(['error' => 'Video bulunamadı: ' . $query], 404);
+            return response()->json(['error' => 'Video bulunamadı: '.$query], 404);
         }
 
         $state = RoomMusicState::firstOrCreate(
@@ -96,20 +106,20 @@ class MusicController extends Controller
             ['queue' => []]
         );
 
-        $title    = $this->getVideoTitle($videoId);
+        $title = $this->getVideoTitle($videoId);
         $duration = $this->getVideoDuration($videoId);
 
         if (! $state->video_id) {
             /* No current track — play immediately */
             $state->fill([
-                'video_id'         => $videoId,
-                'video_title'      => $title,
-                'video_duration'   => $duration,
-                'is_playing'       => true,
-                'position'         => 0,
-                'started_at_unix'  => time(),
+                'video_id' => $videoId,
+                'video_title' => $title,
+                'video_duration' => $duration,
+                'is_playing' => true,
+                'position' => 0,
+                'started_at_unix' => time(),
                 'state_updated_at' => now(),
-                'updated_by'       => $user->id,
+                'updated_by' => $user->id,
             ])->save();
             $this->djBotJoin($roomId);
             $this->postSystemMessage($roomId, "🎵 Şu an çalıyor: {$title}");
@@ -122,6 +132,7 @@ class MusicController extends Controller
         }
 
         $this->broadcast($state);
+
         return response()->json(['ok' => true, 'state' => $this->formatState($state)]);
     }
 
@@ -135,16 +146,17 @@ class MusicController extends Controller
 
         $curPos = $state->current_position;
         $state->fill([
-            'is_playing'       => false,
-            'position'         => $curPos,
-            'started_at_unix'  => null,
+            'is_playing' => false,
+            'position' => $curPos,
+            'started_at_unix' => null,
             'state_updated_at' => now(),
-            'updated_by'       => $user->id,
+            'updated_by' => $user->id,
         ])->save();
 
         $this->djBotLeave($roomId);
         $this->postSystemMessage($roomId, '⏸ Müzik duraklatıldı');
         $this->broadcast($state);
+
         return response()->json(['ok' => true, 'state' => $this->formatState($state)]);
     }
 
@@ -158,16 +170,17 @@ class MusicController extends Controller
 
         $pos = (float) ($state->position ?? 0);
         $state->fill([
-            'is_playing'       => true,
-            'position'         => $pos,
-            'started_at_unix'  => time() - (int) $pos,
+            'is_playing' => true,
+            'position' => $pos,
+            'started_at_unix' => time() - (int) $pos,
             'state_updated_at' => now(),
-            'updated_by'       => $user->id,
+            'updated_by' => $user->id,
         ])->save();
 
         $this->djBotJoin($roomId);
         $this->postSystemMessage($roomId, "▶ Devam ediyor: {$state->video_title}");
         $this->broadcast($state);
+
         return response()->json(['ok' => true, 'state' => $this->formatState($state)]);
     }
 
@@ -191,6 +204,7 @@ class MusicController extends Controller
         }
 
         $this->broadcast($state);
+
         return response()->json(['ok' => true, 'state' => $this->formatState($state)]);
     }
 
@@ -205,12 +219,13 @@ class MusicController extends Controller
         $queue = $state->queue ?? [];
         if (count($queue) > 0) {
             foreach ($queue as $i => $item) {
-                $lines[] = ($i + 1) . ". {$item['title']}";
+                $lines[] = ($i + 1).". {$item['title']}";
             }
         } else {
             $lines[] = 'Sırada şarkı yok.';
         }
         $this->postSystemMessage($roomId, implode("\n", $lines));
+
         return response()->json(['ok' => true, 'queue' => $queue]);
     }
 
@@ -232,33 +247,95 @@ class MusicController extends Controller
             ->join('users', 'users.id', '=', 'voice_sessions.user_id')
             ->where('voice_sessions.room_id', $roomId)
             ->where('voice_sessions.is_active', true)
-            ->select('users.id', 'users.username', 'users.avatar_url', 'voice_sessions.is_muted')
-            ->get()->toArray();
+            ->select(
+                'users.id',
+                'users.username',
+                'users.avatar_url',
+                'voice_sessions.is_muted',
+                'voice_sessions.is_deafened',
+                'voice_sessions.is_speaking',
+                'voice_sessions.can_speak',
+                'voice_sessions.connection_quality',
+                'voice_sessions.reconnect_count'
+            )
+            ->get()
+            ->map(fn ($p) => [
+                'id' => (int) $p->id,
+                'username' => $p->username,
+                'avatar_url' => $p->avatar_url,
+                'is_muted' => (bool) $p->is_muted,
+                'is_deafened' => (bool) $p->is_deafened,
+                'is_speaking' => (bool) $p->is_speaking,
+                'can_speak' => (bool) $p->can_speak,
+                'connection_quality' => $p->connection_quality ?? 'unknown',
+                'reconnect_count' => (int) $p->reconnect_count,
+            ])
+            ->toArray();
 
         if ($includeDjBot) {
-            $participants[] = (object) [
-                'id'         => self::DJ_BOT_USER_ID,
-                'username'   => self::DJ_BOT_USERNAME,
+            $participants[] = [
+                'id' => self::DJ_BOT_USER_ID,
+                'username' => self::DJ_BOT_USERNAME,
                 'avatar_url' => null,
-                'is_muted'   => true,
+                'is_muted' => true,
+                'is_deafened' => false,
+                'is_speaking' => false,
+                'can_speak' => false,
+                'connection_quality' => 'unknown',
+                'reconnect_count' => 0,
             ];
         }
 
         try {
             broadcast(new VoiceStateChanged($roomId, $participants));
-        } catch (\Throwable) {}
+        } catch (\Throwable $e) {
+            Log::warning('music.broadcast.voice_state_failed', [
+                'room_id' => $roomId,
+                'error' => $e->getMessage(),
+            ]);
+            AppMetrics::increment('external_service_errors_total', ['service' => 'reverb', 'reason' => 'music_voice_state_broadcast']);
+        }
     }
 
     /* ── System message in chat ── */
 
     private function postSystemMessage(int $roomId, string $content): void
     {
-        Message::create([
-            'room_id'           => $roomId,
-            'sender_id'         => Auth::id(),
-            'content'           => $content,
+        $message = Message::create([
+            'room_id' => $roomId,
+            'sender_id' => Auth::id(),
+            'content' => $content,
             'is_system_message' => true,
         ]);
+
+        $message->load('sender');
+
+        try {
+            broadcast(new MessageSent($roomId, [
+                'id' => $message->id,
+                'title' => $message->title,
+                'content' => $message->content,
+                'audio_url' => null,
+                'audio_duration' => null,
+                'is_system_message' => true,
+                'reply_to' => null,
+                'reply_message' => null,
+                'created_at' => $message->created_at->toISOString(),
+                'sender' => $message->sender ? [
+                    'id' => $message->sender->id,
+                    'username' => $message->sender->username,
+                    'avatar_url' => $message->sender->avatar_url,
+                    'role' => $message->sender->role,
+                ] : null,
+            ]));
+        } catch (\Throwable $e) {
+            Log::warning('music.broadcast.system_message_failed', [
+                'room_id' => $roomId,
+                'message_id' => $message->id,
+                'error' => $e->getMessage(),
+            ]);
+            AppMetrics::increment('external_service_errors_total', ['service' => 'reverb', 'reason' => 'music_system_message_broadcast']);
+        }
     }
 
     /* ── YouTube search ── */
@@ -271,6 +348,7 @@ class MusicController extends Controller
         if (preg_match('/^[\w-]{11}$/', $input)) {
             return $input;
         }
+
         return null;
     }
 
@@ -278,7 +356,7 @@ class MusicController extends Controller
     {
         /* Try scraping YouTube search results page (no API key needed) */
         try {
-            $url = 'https://www.youtube.com/results?search_query=' . urlencode($query);
+            $url = 'https://www.youtube.com/results?search_query='.urlencode($query);
             $ctx = stream_context_create([
                 'http' => [
                     'timeout' => 5,
@@ -290,23 +368,36 @@ class MusicController extends Controller
             if ($html && preg_match('/\/watch\?v=([\w-]{11})/', $html, $m)) {
                 return $m[1];
             }
-        } catch (\Exception $e) {}
+        } catch (\Exception $e) {
+            Log::warning('music.youtube.scrape_failed', [
+                'query' => $query,
+                'error' => $e->getMessage(),
+            ]);
+            AppMetrics::increment('external_service_errors_total', ['service' => 'youtube', 'reason' => 'scrape_failed']);
+        }
 
         /* Fallback: YouTube Data API if key is configured */
         $apiKey = config('services.youtube.key', env('YOUTUBE_API_KEY', ''));
         if ($apiKey) {
             try {
                 $url = 'https://www.googleapis.com/youtube/v3/search?part=snippet'
-                    . '&type=video&maxResults=1&videoEmbeddable=true'
-                    . '&q=' . urlencode($query)
-                    . '&key=' . urlencode($apiKey);
-                $ctx  = stream_context_create(['http' => ['timeout' => 5, 'ignore_errors' => true]]);
+                    .'&type=video&maxResults=1&videoEmbeddable=true'
+                    .'&q='.urlencode($query)
+                    .'&key='.urlencode($apiKey);
+                $ctx = stream_context_create(['http' => ['timeout' => 5, 'ignore_errors' => true]]);
                 $json = @file_get_contents($url, false, $ctx);
                 if ($json) {
                     $data = json_decode($json, true);
+
                     return $data['items'][0]['id']['videoId'] ?? null;
                 }
-            } catch (\Exception $e) {}
+            } catch (\Exception $e) {
+                Log::warning('music.youtube.search_api_failed', [
+                    'query' => $query,
+                    'error' => $e->getMessage(),
+                ]);
+                AppMetrics::increment('external_service_errors_total', ['service' => 'youtube', 'reason' => 'search_api_failed']);
+            }
         }
 
         return null;
@@ -315,8 +406,11 @@ class MusicController extends Controller
     private function queuePosition(array $queue, string $videoId): int
     {
         foreach ($queue as $i => $item) {
-            if ($item['video_id'] === $videoId) return $i + 1;
+            if ($item['video_id'] === $videoId) {
+                return $i + 1;
+            }
         }
+
         return count($queue);
     }
 
@@ -328,26 +422,26 @@ class MusicController extends Controller
         if (count($queue) > 0) {
             $next = array_shift($queue);
             $state->fill([
-                'video_id'         => $next['video_id'],
-                'video_title'      => $next['title'] ?? $next['video_id'],
-                'video_duration'   => $next['duration'] ?? 0,
-                'is_playing'       => true,
-                'position'         => 0,
-                'started_at_unix'  => time(),
-                'queue'            => $queue,
+                'video_id' => $next['video_id'],
+                'video_title' => $next['title'] ?? $next['video_id'],
+                'video_duration' => $next['duration'] ?? 0,
+                'is_playing' => true,
+                'position' => 0,
+                'started_at_unix' => time(),
+                'queue' => $queue,
                 'state_updated_at' => now(),
-                'updated_by'       => Auth::id(),
+                'updated_by' => Auth::id(),
             ])->save();
         } else {
             $state->fill([
-                'video_id'         => null,
-                'video_title'      => null,
-                'video_duration'   => 0,
-                'is_playing'       => false,
-                'position'         => 0,
-                'started_at_unix'  => null,
+                'video_id' => null,
+                'video_title' => null,
+                'video_duration' => 0,
+                'is_playing' => false,
+                'position' => 0,
+                'started_at_unix' => null,
                 'state_updated_at' => now(),
-                'updated_by'       => Auth::id(),
+                'updated_by' => Auth::id(),
             ])->save();
             $this->djBotLeave($rid);
         }
@@ -356,14 +450,23 @@ class MusicController extends Controller
     private function getVideoTitle(string $videoId): string
     {
         try {
-            $url = 'https://www.youtube.com/oembed?url=' . urlencode('https://www.youtube.com/watch?v=' . $videoId) . '&format=json';
-            $ctx  = stream_context_create(['http' => ['timeout' => 4, 'ignore_errors' => true]]);
+            $url = 'https://www.youtube.com/oembed?url='.urlencode('https://www.youtube.com/watch?v='.$videoId).'&format=json';
+            $ctx = stream_context_create(['http' => ['timeout' => 4, 'ignore_errors' => true]]);
             $json = @file_get_contents($url, false, $ctx);
             if ($json) {
                 $data = json_decode($json, true);
-                if (!empty($data['title'])) return $data['title'];
+                if (! empty($data['title'])) {
+                    return $data['title'];
+                }
             }
-        } catch (\Exception $e) {}
+        } catch (\Exception $e) {
+            Log::warning('music.youtube.oembed_failed', [
+                'video_id' => $videoId,
+                'error' => $e->getMessage(),
+            ]);
+            AppMetrics::increment('external_service_errors_total', ['service' => 'youtube', 'reason' => 'oembed_failed']);
+        }
+
         return $videoId;
     }
 
@@ -372,17 +475,28 @@ class MusicController extends Controller
     {
         try {
             $apiKey = config('services.youtube.key', env('YOUTUBE_API_KEY', ''));
-            if (! $apiKey) return 0;
+            if (! $apiKey) {
+                return 0;
+            }
             $url = 'https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id='
-                . urlencode($videoId) . '&key=' . urlencode($apiKey);
-            $ctx  = stream_context_create(['http' => ['timeout' => 5, 'ignore_errors' => true]]);
+                .urlencode($videoId).'&key='.urlencode($apiKey);
+            $ctx = stream_context_create(['http' => ['timeout' => 5, 'ignore_errors' => true]]);
             $json = @file_get_contents($url, false, $ctx);
             if ($json) {
                 $data = json_decode($json, true);
-                $iso  = $data['items'][0]['contentDetails']['duration'] ?? null;
-                if ($iso) return (float) $this->iso8601ToSeconds($iso);
+                $iso = $data['items'][0]['contentDetails']['duration'] ?? null;
+                if ($iso) {
+                    return (float) $this->iso8601ToSeconds($iso);
+                }
             }
-        } catch (\Exception $e) {}
+        } catch (\Exception $e) {
+            Log::warning('music.youtube.duration_failed', [
+                'video_id' => $videoId,
+                'error' => $e->getMessage(),
+            ]);
+            AppMetrics::increment('external_service_errors_total', ['service' => 'youtube', 'reason' => 'duration_failed']);
+        }
+
         return 0;
     }
 
@@ -390,22 +504,23 @@ class MusicController extends Controller
     private function iso8601ToSeconds(string $iso): int
     {
         preg_match('/PT(?:([0-9]+)H)?(?:([0-9]+)M)?(?:([0-9]+)S)?/', $iso, $m);
-        return (int)($m[1] ?? 0) * 3600
-             + (int)($m[2] ?? 0) * 60
-             + (int)($m[3] ?? 0);
+
+        return (int) ($m[1] ?? 0) * 3600
+             + (int) ($m[2] ?? 0) * 60
+             + (int) ($m[3] ?? 0);
     }
 
     private function formatState(RoomMusicState $state): array
     {
         return [
-            'video_id'         => $state->video_id,
-            'video_title'      => $state->video_title,
-            'video_duration'   => (float) $state->video_duration,
-            'is_playing'       => (bool) $state->is_playing,
-            'position'         => $state->position,
-            'started_at_unix'  => $state->started_at_unix, /* key for client-side sync */
+            'video_id' => $state->video_id,
+            'video_title' => $state->video_title,
+            'video_duration' => (float) $state->video_duration,
+            'is_playing' => (bool) $state->is_playing,
+            'position' => $state->position,
+            'started_at_unix' => $state->started_at_unix, /* key for client-side sync */
             'current_position' => $state->current_position,
-            'queue'            => $state->queue ?? [],
+            'queue' => $state->queue ?? [],
         ];
     }
 }

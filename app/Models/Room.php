@@ -6,12 +6,21 @@ use Illuminate\Database\Eloquent\Model;
 
 class Room extends Model
 {
-    protected $fillable = ['name', 'type', 'created_by', 'is_archived'];
+    protected $fillable = [
+        'name',
+        'type',
+        'created_by',
+        'is_archived',
+        'voice_members_only',
+        'voice_requires_permission',
+    ];
 
     protected function casts(): array
     {
         return [
             'is_archived' => 'boolean',
+            'voice_members_only' => 'boolean',
+            'voice_requires_permission' => 'boolean',
         ];
     }
 

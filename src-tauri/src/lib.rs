@@ -138,7 +138,7 @@ fn register_shortcuts(app: &mut tauri::App) -> tauri::Result<()> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WebKit2GTK: auto-grant media capture permissions (mic / camera)
+// WebKit2GTK: auto-grant only user-media capture required by voice chat.
 // ─────────────────────────────────────────────────────────────────────────────
 fn allow_media_permissions(app: &mut tauri::App) {
     #[cfg(target_os = "linux")]
@@ -148,9 +148,7 @@ fn allow_media_permissions(app: &mut tauri::App) {
             use webkit2gtk::PermissionRequestExt;
             if let Some(wk) = webview.inner().dynamic_cast_ref::<webkit2gtk::WebView>() {
                 wk.connect_permission_requested(|_, request| {
-                    if request.is::<webkit2gtk::MediaKeySystemPermissionRequest>()
-                        || request.is::<webkit2gtk::UserMediaPermissionRequest>()
-                    {
+                    if request.is::<webkit2gtk::UserMediaPermissionRequest>() {
                         request.allow();
                         return glib::signal::Inhibit(true);
                     }

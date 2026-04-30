@@ -2,8 +2,8 @@
 
 namespace App\Events;
 
-use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
+use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
@@ -17,13 +17,14 @@ class VoiceStateChanged implements ShouldBroadcastNow
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public function __construct(
-        public readonly int   $roomId,
+        public readonly int $roomId,
         public readonly array $participants,
+        public readonly ?array $settings = null,
     ) {}
 
     public function broadcastOn(): array
     {
-        return [new Channel("room.{$this->roomId}.voice")];
+        return [new PrivateChannel("room.{$this->roomId}.voice")];
     }
 
     public function broadcastAs(): string
@@ -33,6 +34,9 @@ class VoiceStateChanged implements ShouldBroadcastNow
 
     public function broadcastWith(): array
     {
-        return ['participants' => $this->participants];
+        return array_filter([
+            'participants' => $this->participants,
+            'settings' => $this->settings,
+        ], fn ($value) => $value !== null);
     }
 }

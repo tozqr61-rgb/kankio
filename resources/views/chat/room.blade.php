@@ -380,6 +380,9 @@ function unlockAudio(btn) {
                 <div>
                     <p class="text-base font-medium text-white" x-text="voiceState.in_voice ? 'Ses Kanalındasınız' : 'Ses Kanalı'"></p>
                     <p class="text-xs text-zinc-500" x-text="(voiceState.participants?.length || 0) + ' katılımcı'"></p>
+                    <p x-show="voiceState.in_voice" class="text-[10px] mt-0.5"
+                       :style="voiceConnectionStatus === 'reconnecting' ? 'color:rgba(251,191,36,1)' : 'color:rgba(113,113,122,1)'"
+                       x-text="voiceConnectionStatus === 'reconnecting' ? 'Yeniden bağlanıyor...' : ('Kalite: ' + qualityLabel(voiceState.connection_quality))"></p>
                 </div>
             </div>
             <!-- Join/Leave -->
@@ -395,12 +398,54 @@ function unlockAudio(btn) {
                             :style="voiceState.is_muted ? 'background:rgba(245,158,11,0.15);color:rgba(251,191,36,1);border:1px solid rgba(245,158,11,0.3)' : 'background:rgba(16,185,129,0.1);color:rgba(52,211,153,1);border:1px solid rgba(52,211,153,0.2)'">
                         <span x-text="voiceState.is_muted ? '🔇 Sesi Aç' : '🎤 Sesi Kapat'"></span>
                     </button>
+                    <button @click="voiceToggleDeafen()" class="flex-1 py-3.5 rounded-2xl text-sm font-semibold transition-all"
+                            :style="voiceState.is_deafened ? 'background:rgba(99,102,241,0.16);color:rgba(165,180,252,1);border:1px solid rgba(99,102,241,0.3)' : 'background:rgba(255,255,255,0.06);color:rgba(161,161,170,1);border:1px solid rgba(255,255,255,0.08)'">
+                        <span x-text="voiceState.is_deafened ? 'Kulaklık Aç' : 'Sağırlaştır'"></span>
+                    </button>
                     <button @click="voiceLeave(); mobileTab='chat'" class="flex-1 py-3.5 rounded-2xl text-sm font-semibold"
                             style="background:rgba(239,68,68,0.15);color:rgba(248,113,113,1);border:1px solid rgba(239,68,68,0.2)">
                         Ayrıl
                     </button>
                 </div>
             </template>
+            <div x-show="voiceState.in_voice" class="grid grid-cols-1 gap-2 text-xs text-zinc-400">
+                <label class="flex items-center justify-between gap-3 px-3 py-2 rounded-xl" style="background:rgba(255,255,255,0.04)">
+                    <span>Bas-konuş</span>
+                    <input type="checkbox" x-model="voicePrefs.pushToTalk" @change="_applyLocalMicState()" class="accent-emerald-500">
+                </label>
+                <label class="flex items-center justify-between gap-3 px-3 py-2 rounded-xl" style="background:rgba(255,255,255,0.04)">
+                    <span>Gürültü azaltma</span>
+                    <input type="checkbox" x-model="voicePrefs.noiseSuppression" @change="_applyLocalMicState()" class="accent-emerald-500">
+                </label>
+                <label class="flex items-center justify-between gap-3 px-3 py-2 rounded-xl" style="background:rgba(255,255,255,0.04)">
+                    <span>Yankı engelleme</span>
+                    <input type="checkbox" x-model="voicePrefs.echoCancellation" @change="_applyLocalMicState()" class="accent-emerald-500">
+                </label>
+                <label class="flex items-center justify-between gap-3 px-3 py-2 rounded-xl" style="background:rgba(255,255,255,0.04)">
+                    <span>Düşük bant genişliği</span>
+                    <input type="checkbox" x-model="voicePrefs.lowBandwidth" @change="_applyLocalMicState()" class="accent-emerald-500">
+                </label>
+            </div>
+            <div x-show="voiceState.in_voice && voiceState.can_moderate" class="grid grid-cols-1 gap-2 text-xs text-zinc-400">
+                <label class="flex items-center justify-between gap-3 px-3 py-2 rounded-xl" style="background:rgba(255,255,255,0.04)">
+                    <span>Sadece oda üyeleri seste</span>
+                    <input type="checkbox"
+                           :checked="!!voiceState.settings?.voice_members_only"
+                           @change="voiceUpdateSettings({ voice_members_only: $event.target.checked })"
+                           class="accent-emerald-500">
+                </label>
+                <label class="flex items-center justify-between gap-3 px-3 py-2 rounded-xl" style="background:rgba(255,255,255,0.04)">
+                    <span>Konuşma izni sistemi</span>
+                    <input type="checkbox"
+                           :checked="!!voiceState.settings?.voice_requires_permission"
+                           @change="voiceUpdateSettings({ voice_requires_permission: $event.target.checked })"
+                           class="accent-emerald-500">
+                </label>
+                <button @click="voiceMuteAll()" class="py-2 rounded-xl font-medium"
+                        style="background:rgba(245,158,11,0.12);color:rgba(251,191,36,1)">
+                    Herkesi Sustur
+                </button>
+            </div>
         </div>
 
         <!-- Participants grid (same as desktop but full-width) -->
@@ -427,6 +472,18 @@ function unlockAudio(btn) {
                             </div>
                         </div>
                         <span class="text-[10px] text-zinc-300 truncate w-full text-center" x-text="p.username"></span>
+                        <div x-show="voiceState.can_moderate && String(p.id) !== String(currentUser.id)"
+                             class="flex gap-1 w-full">
+                            <button @click="voiceSetSpeakPermission(p, !p.can_speak)"
+                                    class="flex-1 py-1 rounded-lg text-[9px]"
+                                    style="background:rgba(255,255,255,0.06);color:rgba(212,212,216,1)"
+                                    x-text="p.can_speak ? 'Sustur' : 'İzin ver'"></button>
+                            <button @click="voiceKick(p)"
+                                    class="flex-1 py-1 rounded-lg text-[9px]"
+                                    style="background:rgba(239,68,68,0.12);color:rgba(248,113,113,1)">
+                                At
+                            </button>
+                        </div>
                     </div>
                 </template>
             </div>
@@ -464,6 +521,12 @@ function unlockAudio(btn) {
                 </button>
             </div>
 
+            <div x-show="Object.keys(typingUsers).length > 0" x-transition
+                 class="px-4 text-[10px] tracking-wide"
+                 style="color:rgba(161,161,170,0.75)">
+                <span x-text="Object.values(typingUsers).map(u => u.username).slice(0,2).join(', ') + ' yazıyor...'"></span>
+            </div>
+
             <!-- Normal chat input (non-announcements rooms) -->
             <template x-if="roomType !== 'announcements'">
             <div class="relative flex items-center gap-2 p-1 pl-5 backdrop-blur-2xl border shadow-2xl transition-all duration-300"
@@ -497,6 +560,7 @@ function unlockAudio(btn) {
                         type="text"
                         :placeholder="replyingTo ? 'Yanıt yaz...' : 'Mesaj yaz veya /play şarkı adı...'"
                         class="w-full bg-transparent border-none text-sm text-white placeholder-zinc-600 py-4 font-light tracking-wide outline-none"
+                        @input.debounce.500ms="sendTyping(true)"
                         @keydown.enter.prevent="sendMessage()"
                         :disabled="sending">
                 </template>
@@ -546,6 +610,7 @@ function unlockAudio(btn) {
                               rows="2"
                               maxlength="4000"
                               class="flex-1 bg-transparent border-none text-sm text-white placeholder-zinc-600 py-2 font-light outline-none resize-none"
+                              @input.debounce.500ms="sendTyping(true)"
                               @keydown.ctrl.enter.prevent="sendMessage()"
                               :disabled="sending"></textarea>
                     <button @click="sendMessage()" :disabled="sending || !inputValue.trim() || !announcementTitle.trim()"
@@ -611,6 +676,9 @@ function unlockAudio(btn) {
                 <div>
                     <p class="text-sm font-medium text-white" x-text="voiceState.in_voice ? 'Ses Kanalındasınız' : 'Ses Kanalı'"></p>
                     <p class="text-[10px] text-zinc-500" x-text="(voiceState.participants?.length || 0) + ' katılımcı'"></p>
+                    <p x-show="voiceState.in_voice" class="text-[9px]"
+                       :style="voiceConnectionStatus === 'reconnecting' ? 'color:rgba(251,191,36,1)' : 'color:rgba(113,113,122,1)'"
+                       x-text="voiceConnectionStatus === 'reconnecting' ? 'Yeniden bağlanıyor...' : qualityLabel(voiceState.connection_quality)"></p>
                 </div>
             </div>
             <div class="flex gap-2">
@@ -630,6 +698,20 @@ function unlockAudio(btn) {
                     </button>
                 </template>
                 <template x-if="voiceState.in_voice">
+                    <button @click="voiceToggleDeafen()"
+                        class="py-2.5 px-3 rounded-xl text-xs font-medium transition-all"
+                        :style="voiceState.is_deafened ? 'background:rgba(99,102,241,0.16);color:rgba(165,180,252,1)' : 'background:rgba(255,255,255,0.07);color:rgba(161,161,170,1)'"
+                        x-text="voiceState.is_deafened ? 'Dinle' : 'Sağırlaş'">
+                    </button>
+                </template>
+                <template x-if="voiceState.in_voice && voiceState.can_moderate">
+                    <button @click="voiceMuteAll()"
+                        class="py-2.5 px-3 rounded-xl text-xs font-medium transition-all"
+                        style="background:rgba(245,158,11,0.12);color:rgba(251,191,36,1)">
+                        Herkesi Sustur
+                    </button>
+                </template>
+                <template x-if="voiceState.in_voice">
                     <button @click="voiceLeave()"
                         class="py-2.5 px-4 rounded-xl text-xs font-medium transition-all"
                         style="background:rgba(239,68,68,0.15);color:rgba(248,113,113,1)"
@@ -637,6 +719,40 @@ function unlockAudio(btn) {
                         Ayrıl
                     </button>
                 </template>
+            </div>
+            <div x-show="voiceState.in_voice" class="grid gap-2 text-[10px] text-zinc-400 text-left">
+                <label class="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg" style="background:rgba(255,255,255,0.04)">
+                    <span>Bas-konuş</span>
+                    <input type="checkbox" x-model="voicePrefs.pushToTalk" @change="_applyLocalMicState()" class="accent-emerald-500">
+                </label>
+                <label class="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg" style="background:rgba(255,255,255,0.04)">
+                    <span>Gürültü azaltma</span>
+                    <input type="checkbox" x-model="voicePrefs.noiseSuppression" @change="_applyLocalMicState()" class="accent-emerald-500">
+                </label>
+                <label class="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg" style="background:rgba(255,255,255,0.04)">
+                    <span>Yankı engelleme</span>
+                    <input type="checkbox" x-model="voicePrefs.echoCancellation" @change="_applyLocalMicState()" class="accent-emerald-500">
+                </label>
+                <label class="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg" style="background:rgba(255,255,255,0.04)">
+                    <span>Düşük veri</span>
+                    <input type="checkbox" x-model="voicePrefs.lowBandwidth" @change="_applyLocalMicState()" class="accent-emerald-500">
+                </label>
+            </div>
+            <div x-show="voiceState.in_voice && voiceState.can_moderate" class="grid gap-2 text-[10px] text-zinc-400 text-left">
+                <label class="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg" style="background:rgba(255,255,255,0.04)">
+                    <span>Sadece oda üyeleri seste</span>
+                    <input type="checkbox"
+                           :checked="!!voiceState.settings?.voice_members_only"
+                           @change="voiceUpdateSettings({ voice_members_only: $event.target.checked })"
+                           class="accent-emerald-500">
+                </label>
+                <label class="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg" style="background:rgba(255,255,255,0.04)">
+                    <span>Konuşma izni sistemi</span>
+                    <input type="checkbox"
+                           :checked="!!voiceState.settings?.voice_requires_permission"
+                           @change="voiceUpdateSettings({ voice_requires_permission: $event.target.checked })"
+                           class="accent-emerald-500">
+                </label>
             </div>
         </div>
 
@@ -683,6 +799,18 @@ function unlockAudio(btn) {
                         </div>
 
                         <p class="text-[10px] text-zinc-300 truncate w-full text-center" x-text="p.username"></p>
+                        <div x-show="voiceState.can_moderate && String(p.id) !== String(currentUser.id)"
+                             class="flex gap-1 w-full">
+                            <button @click="voiceSetSpeakPermission(p, !p.can_speak)"
+                                    class="flex-1 py-1 rounded-md text-[9px]"
+                                    style="background:rgba(255,255,255,0.06);color:rgba(212,212,216,1)"
+                                    x-text="p.can_speak ? 'Sustur' : 'İzin ver'"></button>
+                            <button @click="voiceKick(p)"
+                                    class="flex-1 py-1 rounded-md text-[9px]"
+                                    style="background:rgba(239,68,68,0.12);color:rgba(248,113,113,1)">
+                                At
+                            </button>
+                        </div>
                     </div>
                 </template>
             </div>
@@ -899,6 +1027,7 @@ function chatRoom() {
         _pollTimer: null,
         _idleCount: 0,
         _hidden: false,
+        _realtimeReady: false,
 
         /* Right sidebar state */
         musicOpen: false,
@@ -949,17 +1078,30 @@ function chatRoom() {
 
         /* Message seen tracking */
         _seenTimer: null,
+        typingUsers: {},
+        _typingTimer: null,
+        _typingSent: false,
 
         /* SPA room state */
         _roomId:   '{{ $room->id }}',
         _roomName: '{{ addslashes($room->name) }}',
 
         /* Voice state */
-        voiceState: { in_voice: false, is_muted: false, participants: [] },
+        voiceState: {
+            in_voice: false, is_muted: false, is_deafened: false, can_speak: true,
+            connection_quality: 'unknown', reconnect_count: 0, can_moderate: false,
+            settings: {}, participants: []
+        },
         _voiceRoomId: null,   /* room where voice is LOCKED — never changes during navigation */
         _lkRoom: null,        /* LiveKit Room instance */
         _audioEls: {},        /* { userId: HTMLAudioElement } */
         _voiceTimer: null,
+        _manualVoiceLeave: false,
+        _voiceReconnectAttempts: 0,
+        _voiceReconnectTimer: null,
+        voiceConnectionStatus: 'idle', /* idle | connecting | connected | reconnecting | failed */
+        voicePrefs: { noiseSuppression: true, echoCancellation: true, pushToTalk: false, lowBandwidth: false },
+        _pttDown: false,
 
         /* Active speaker detection */
         _speakingUsers: {},   /* { userId: bool } */
@@ -1001,6 +1143,7 @@ function chatRoom() {
             this._initBackgroundHandlers();
             this._initTauri();
             this._startSeenTracking();
+            this._initPushToTalk();
         },
 
         /* ── Room Transition ── */
@@ -1037,6 +1180,12 @@ function chatRoom() {
         async _doPoll() {
             if (this._hidden) return;
             try {
+                if (this._realtimeReady) {
+                    await this._syncMusic();
+                    this._schedulePoll(15000);
+                    return;
+                }
+
                 /* Messages */
                 const url = `/api/chat/${ROOM_ID}/messages${this.lastMessageAt ? '?since='+encodeURIComponent(this.lastMessageAt) : ''}`;
                 const r = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
@@ -1090,6 +1239,7 @@ function chatRoom() {
         async _handleSlashCommand(text) {
             this.sending = true;
             this.inputValue = '';
+            this.sendTyping(false);
 
             /* ── User gesture context: unlock iframe audio BEFORE async fetch ──
                Browser autoplay policy requires audio-producing elements to be
@@ -1149,6 +1299,7 @@ function chatRoom() {
             const replyId = this.replyingTo ? this.replyingTo.id : null;
             this.replyingTo = null;
             this.inputValue = '';
+            this.sendTyping(false);
 
             /* ── Optimistic: insert message immediately, replace after server confirms ── */
             const tempId = '_tmp_' + Date.now();
@@ -1248,6 +1399,57 @@ function chatRoom() {
             } catch(e) {}
         },
 
+        _appendRealtimeMessage(msg) {
+            if (!msg || !msg.id) return;
+            const exists = this.messages.some(m => String(m.id) === String(msg.id));
+            if (exists) return;
+            this.messages.push(msg);
+            if (!this.lastMessageAt || msg.created_at > this.lastMessageAt) this.lastMessageAt = msg.created_at;
+            this._idleCount = 0;
+            this._playSound();
+            this.$nextTick(() => this.scrollToBottom());
+        },
+
+        async sendTyping(isTyping) {
+            if (this.roomType === 'announcements') return;
+            if (isTyping && !this.inputValue.trim()) isTyping = false;
+            if (this._typingSent === isTyping) return;
+            this._typingSent = isTyping;
+            clearTimeout(this._typingTimer);
+            if (isTyping) {
+                this._typingTimer = setTimeout(() => this.sendTyping(false), 2500);
+            }
+            try {
+                await fetch(`/api/chat/${ROOM_ID}/typing`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                    body: JSON.stringify({ is_typing: isTyping })
+                });
+            } catch(e) {}
+        },
+
+        _applyTyping(user, isTyping) {
+            if (!user || user.id == this.currentUser.id) return;
+            if (!isTyping) {
+                delete this.typingUsers[user.id];
+            } else {
+                this.typingUsers[user.id] = user;
+                setTimeout(() => { delete this.typingUsers[user.id]; this.typingUsers = { ...this.typingUsers }; }, 3500);
+            }
+            this.typingUsers = { ...this.typingUsers };
+        },
+
+        _applyReadReceipt(readerId, messageIds) {
+            if (!Array.isArray(messageIds)) return;
+            const ids = new Set(messageIds.map(id => String(id)));
+            this.messages = this.messages.map(m => {
+                if (!ids.has(String(m.id))) return m;
+                const readers = new Set(m.read_by || []);
+                readers.add(readerId);
+                return { ...m, read_by: Array.from(readers), read_count: readers.size };
+            });
+        },
+
         toggleLeft() {
             window.dispatchEvent(new CustomEvent('toggle-left-sidebar'));
         },
@@ -1297,7 +1499,7 @@ function chatRoom() {
                     this._syncMusic();
                     /* Re-create broken voice connections */
                     if (this.voiceState.in_voice && this._lkRoom && this._lkRoom.state === 'disconnected') {
-                        try { this._lkRoom.connect(this.voiceState.livekit_url, this.voiceState.livekit_token); } catch(e) {}
+                        this._scheduleVoiceReconnect();
                     }
                     this.connected = true;
                 }, 1500);
@@ -1356,35 +1558,54 @@ function chatRoom() {
                         enabledTransports: ['ws'],
                     };
                 }
-                this._echo = new window.LaravelEcho({
+                this._echo = window.KANKIO_ECHO || new window.LaravelEcho({
                     ...echoConfig,
                     auth: {
                         headers: { 'X-CSRF-TOKEN': CSRF },
                     },
                     authEndpoint: `/broadcasting/auth`,
                 });
+                window.KANKIO_ECHO = this._echo;
+
+                /* Chat events: realtime primary; polling remains only as a quiet fallback */
+                this._echo.private(`room.${ROOM_ID}.chat`)
+                    .listen('.message.sent', ({ message }) => {
+                        this._appendRealtimeMessage(message);
+                    })
+                    .listen('.message.deleted', ({ message_id }) => {
+                        this.messages = this.messages.filter(m => String(m.id) !== String(message_id));
+                    })
+                    .listen('.typing', ({ user, is_typing }) => {
+                        this._applyTyping(user, is_typing);
+                    })
+                    .listen('.messages.read', ({ reader_id, message_ids }) => {
+                        this._applyReadReceipt(reader_id, message_ids);
+                    });
 
                 /* Music state push */
-                this._echo.channel(`room.${ROOM_ID}.music`)
+                this._echo.private(`room.${ROOM_ID}.music`)
                     .listen('.music.state', (state) => {
                         this.musicState = state;
                         this._applyMusicState(state);
                     });
 
                 /* Voice state push (participants list — join/leave events only) */
-                this._echo.channel(`room.${ROOM_ID}.voice`)
+                this._echo.private(`room.${ROOM_ID}.voice`)
                     .listen('.voice.state', (data) => {
-                        this.voiceState = { ...this.voiceState, participants: data.participants };
+                        this._applyVoiceState({
+                            participants: data.participants || [],
+                            settings: data.settings || this.voiceState.settings
+                        });
+                    })
+                    .listen('.voice.participant', ({ action, participant }) => {
+                        this._applyVoiceParticipant(action, participant);
                     })
                     /* Lightweight mute patch — updates ONE participant, no full re-render */
                     .listen('.voice.mute', ({ user_id, is_muted }) => {
-                        this.voiceState = {
-                            ...this.voiceState,
-                            participants: this.voiceState.participants.map(p =>
-                                p.id == user_id ? { ...p, is_muted } : p
-                            ),
-                        };
+                        this._applyVoiceParticipant('updated', { id: user_id, is_muted });
                     });
+
+                this._realtimeReady = true;
 
             } catch(e) { /* Reverb not running — polling/DB fallback */ }
         },
@@ -1808,153 +2029,397 @@ function chatRoom() {
         },
 
         /* ══════════ VOICE CHAT (LiveKit) ═══════════ */
-        async voiceJoin() {
-            /* Unlock audio for YouTube iframe immediately */
+        async voiceJoin(options = {}) {
+            const isReconnect = !!options.reconnect;
+            this._manualVoiceLeave = false;
+            this.voiceConnectionStatus = isReconnect ? 'reconnecting' : 'connecting';
+
             this._playerMuted = false;
             this._ensureIframeReady();
 
-            try {
-                await navigator.mediaDevices.getUserMedia({ audio: true });
-            } catch(e) {
-                showToast('Mikrofon erişimi reddedildi', 'error'); return;
+            if (!isReconnect) {
+                try {
+                    await navigator.mediaDevices.getUserMedia({ audio: true });
+                } catch(e) {
+                    this.voiceConnectionStatus = 'failed';
+                    showToast('Mikrofon erişimi reddedildi', 'error'); return;
+                }
             }
 
             try {
-                this._voiceRoomId = this._roomId; /* lock voice to current room */
-                
-                /* Get LiveKit token from backend */
+                this._voiceRoomId = this._roomId;
                 const r = await fetch(`/api/voice/${this._voiceRoomId}/join`, {
-                    method: 'POST', headers: { 'X-CSRF-TOKEN': CSRF }
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
+                    body: JSON.stringify({ reconnect: isReconnect })
                 });
-                const state = await r.json();
-                
+                const state = await this._safeJson(r, 'Ses API');
+
                 if (!r.ok) {
+                    this.voiceConnectionStatus = 'failed';
                     showToast(state.error || 'Ses API hatası oluştu', 'error');
                     return;
                 }
-                
+
                 if (!state.livekit_url || !state.livekit_token) {
+                    this.voiceConnectionStatus = 'failed';
                     showToast('Sunucu LiveKit bilgilerini döndürmedi. .env dosyasını kontrol edin.', 'error');
                     return;
                 }
 
-                this.voiceState = state;
-
-                /* Initialize LiveKit Room */
-                const Room = LivekitClient.Room;
-                const RoomEvent = LivekitClient.RoomEvent;
-                
-                this._lkRoom = new Room({
-                    adaptiveStream: true,
-                    dynacast: true,
-                });
-
-                this._lkRoom.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
-                    if (track.kind === 'audio') {
-                        const el = track.attach();
-                        this._audioEls[participant.identity] = el;
-                    }
-                });
-
-                this._lkRoom.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
-                    if (track.kind === 'audio') {
-                        track.detach();
-                        if (this._audioEls[participant.identity]) {
-                            this._audioEls[participant.identity].remove();
-                            delete this._audioEls[participant.identity];
-                        }
-                    }
-                });
-
-                this._lkRoom.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
-                    const speakingDict = {};
-                    for (const p of speakers) {
-                        speakingDict[p.identity] = true;
-                    }
-                    this._speakingUsers = speakingDict;
-                });
-
-                this._lkRoom.on(RoomEvent.Disconnected, () => {
-                    if (this.voiceState.in_voice) {
-                        this.voiceLeave();
-                    }
-                });
-
-                await this._lkRoom.connect(state.livekit_url, state.livekit_token);
-                await this._lkRoom.localParticipant.setMicrophoneEnabled(true);
-                
-                showToast('Ses kanalına bağlanıldı', 'success');
-                
-                /* Fallback polling to keep session alive and sync mute states of participants */
+                this._applyVoiceState(state);
+                await this._connectLiveKit(state);
+                this._voiceReconnectAttempts = 0;
+                this.voiceConnectionStatus = 'connected';
+                showToast(isReconnect ? 'Ses kanalına yeniden bağlanıldı' : 'Ses kanalına bağlanıldı', 'success');
                 this._startVoicePolling();
 
-                /* Discord-style: start music UNMUTED when joining voice */
                 if (this.musicState.video_id) {
                     this._playerMuted = false;
                     this._applyMusicState(this.musicState);
                 }
             } catch (error) {
-                console.error('Could not connect to LiveKit:', error);
+                this.voiceConnectionStatus = 'failed';
                 showToast('Ses kanalına bağlanılamadı: ' + error.message, 'error');
-                this.voiceLeave();
+                this._scheduleVoiceReconnect();
             }
-
         },
 
-        async voiceLeave() {
-            clearInterval(this._voiceTimer);
-            this._speakingUsers = {};
-            
+        async _connectLiveKit(state) {
+            const Room = LivekitClient.Room;
+            const RoomEvent = LivekitClient.RoomEvent;
+
             if (this._lkRoom) {
-                await this._lkRoom.disconnect();
+                try { await this._lkRoom.disconnect(); } catch(e) {}
                 this._lkRoom = null;
             }
 
+            this._lkRoom = new Room({ adaptiveStream: true, dynacast: true });
+
+            this._lkRoom.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+                if (track.kind !== 'audio') return;
+                const el = track.attach();
+                el.muted = !!this.voiceState.is_deafened;
+                this._audioEls[participant.identity] = el;
+            });
+
+            this._lkRoom.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
+                if (track.kind !== 'audio') return;
+                track.detach();
+                if (this._audioEls[participant.identity]) {
+                    this._audioEls[participant.identity].remove();
+                    delete this._audioEls[participant.identity];
+                }
+            });
+
+            this._lkRoom.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+                const speakingDict = {};
+                for (const p of speakers) speakingDict[p.identity] = true;
+                this._speakingUsers = speakingDict;
+                this._syncLocalSpeaking(!!speakingDict[String(this.currentUser.id)]);
+            });
+
+            if (RoomEvent.ConnectionQualityChanged) {
+                this._lkRoom.on(RoomEvent.ConnectionQualityChanged, (quality, participant) => {
+                    if (participant && participant.identity !== String(this.currentUser.id)) return;
+                    this._sendVoiceQuality(this._mapLiveKitQuality(quality));
+                });
+            }
+
+            if (RoomEvent.Reconnecting) {
+                this._lkRoom.on(RoomEvent.Reconnecting, () => {
+                    this.voiceConnectionStatus = 'reconnecting';
+                    this._sendVoiceQuality('poor', true);
+                });
+            }
+
+            if (RoomEvent.Reconnected) {
+                this._lkRoom.on(RoomEvent.Reconnected, () => {
+                    this.voiceConnectionStatus = 'connected';
+                    this._sendVoiceQuality('good', true);
+                });
+            }
+
+            this._lkRoom.on(RoomEvent.Disconnected, () => {
+                if (this._manualVoiceLeave) return;
+                this.voiceConnectionStatus = 'reconnecting';
+                this._scheduleVoiceReconnect();
+            });
+
+            await this._lkRoom.connect(state.livekit_url, state.livekit_token);
+            await this._applyLocalMicState();
+        },
+
+        async voiceLeave() {
+            this._manualVoiceLeave = true;
+            clearInterval(this._voiceTimer);
+            clearTimeout(this._voiceReconnectTimer);
+            await this._disconnectLocalVoice(true);
+            this.voiceConnectionStatus = 'idle';
+            this.voiceState = {
+                in_voice: false, is_muted: false, is_deafened: false, can_speak: true,
+                connection_quality: 'unknown', reconnect_count: 0, can_moderate: false,
+                settings: {}, participants: []
+            };
+            if (this._ytIframe) this._ytCmd('pauseVideo');
+            this._playerMuted = true;
+        },
+
+        async _disconnectLocalVoice(notifyServer) {
+            this._speakingUsers = {};
+            if (this._lkRoom) {
+                try { await this._lkRoom.disconnect(); } catch(e) {}
+                this._lkRoom = null;
+            }
             for (const uid in this._audioEls) {
                 if (this._audioEls[uid]) this._audioEls[uid].remove();
             }
             this._audioEls = {};
-
-            if (this._voiceRoomId) {
-                await fetch(`/api/voice/${this._voiceRoomId}/leave`, {
+            if (notifyServer && this._voiceRoomId) {
+                fetch(`/api/voice/${this._voiceRoomId}/leave`, {
                     method: 'POST', headers: { 'X-CSRF-TOKEN': CSRF }
-                });
+                }).catch(() => {});
             }
-            
             this._voiceRoomId = null;
-            this.voiceState = { in_voice: false, is_muted: false, participants: [] };
-
-            /* Discord-style: stop music when leaving voice */
-            if (this._ytIframe) { this._ytCmd('pauseVideo'); }
-            this._playerMuted = true;
         },
 
-        async voiceToggleMute() {
-            if (this._lkRoom && this._lkRoom.localParticipant) {
-                const newMuted = !this.voiceState.is_muted;
-                await this._lkRoom.localParticipant.setMicrophoneEnabled(!newMuted);
-                await fetch(`/api/voice/${this._voiceRoomId}/mute`, {
-                    method: 'POST', headers: { 'X-CSRF-TOKEN': CSRF }
-                });
-                this.voiceState.is_muted = newMuted;
+        async voiceToggleMute(force = null) {
+            if (!this._voiceRoomId) return;
+            const newMuted = force === null ? !this.voiceState.is_muted : !!force;
+            if (!this.voiceState.can_speak && !newMuted) {
+                showToast('Bu odada konuşma izniniz yok', 'error');
+                return;
             }
+            await this._setLocalMicMuted(newMuted);
+            try {
+                const r = await fetch(`/api/voice/${this._voiceRoomId}/mute`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
+                    body: JSON.stringify({ is_muted: newMuted })
+                });
+                const data = await this._safeJson(r, 'Ses API');
+                if (!r.ok) { showToast(data.error || 'Mikrofon durumu güncellenemedi', 'error'); return; }
+                this._applyVoiceState({ is_muted: data.is_muted, participant: data.participant });
+            } catch(e) { showToast('Mikrofon durumu güncellenemedi', 'error'); }
         },
 
-        /* ── Polling to keep backend session alive & update participant metadata (like avatar/is_muted) ── */
+        async voiceToggleDeafen() {
+            if (!this._voiceRoomId) return;
+            const newDeafen = !this.voiceState.is_deafened;
+            this._setRemoteAudioMuted(newDeafen);
+            try {
+                const r = await fetch(`/api/voice/${this._voiceRoomId}/deafen`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
+                    body: JSON.stringify({ is_deafened: newDeafen })
+                });
+                const data = await this._safeJson(r, 'Ses API');
+                if (!r.ok) { showToast(data.error || 'Kulaklık durumu güncellenemedi', 'error'); return; }
+                this._applyVoiceState({ is_deafened: data.is_deafened, participant: data.participant });
+            } catch(e) { showToast('Kulaklık durumu güncellenemedi', 'error'); }
+        },
+
+        async voiceMuteAll() {
+            if (!this.voiceState.can_moderate || !this._voiceRoomId) return;
+            if (!confirm('Ses kanalındaki herkesi susturmak istiyor musunuz?')) return;
+            await fetch(`/api/voice/${this._voiceRoomId}/mute-all`, {
+                method: 'POST', headers: { 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' }
+            }).catch(() => {});
+        },
+
+        async voiceKick(participant) {
+            if (!this.voiceState.can_moderate || !this._voiceRoomId || !participant?.id) return;
+            if (!confirm(`${participant.username || 'Kullanıcı'} ses kanalından atılsın mı?`)) return;
+            try {
+                const r = await fetch(`/api/voice/${this._voiceRoomId}/participants/${participant.id}`, {
+                    method: 'DELETE',
+                    headers: { 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' }
+                });
+                const data = await this._safeJson(r, 'Ses API');
+                if (!r.ok) showToast(data.error || 'Kullanıcı atılamadı', 'error');
+            } catch(e) { showToast('Kullanıcı atılamadı', 'error'); }
+        },
+
+        async voiceSetSpeakPermission(participant, canSpeak) {
+            if (!this.voiceState.can_moderate || !this._voiceRoomId || !participant?.id) return;
+            try {
+                const r = await fetch(`/api/voice/${this._voiceRoomId}/participants/${participant.id}/speak`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
+                    body: JSON.stringify({ can_speak: !!canSpeak })
+                });
+                const data = await this._safeJson(r, 'Ses API');
+                if (!r.ok) { showToast(data.error || 'Konuşma izni güncellenemedi', 'error'); return; }
+                this._applyVoiceParticipant('updated', data.participant);
+            } catch(e) { showToast('Konuşma izni güncellenemedi', 'error'); }
+        },
+
+        async voiceUpdateSettings(patch) {
+            if (!this.voiceState.can_moderate || !this._voiceRoomId) return;
+            try {
+                const r = await fetch(`/api/voice/${this._voiceRoomId}/settings`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
+                    body: JSON.stringify(patch)
+                });
+                const data = await this._safeJson(r, 'Ses API');
+                if (!r.ok) { showToast(data.error || 'Ses ayarı güncellenemedi', 'error'); return; }
+                this.voiceState.settings = { ...this.voiceState.settings, ...(data.settings || patch) };
+            } catch(e) { showToast('Ses ayarı güncellenemedi', 'error'); }
+        },
+
         _startVoicePolling() {
+            clearInterval(this._voiceTimer);
             this._voiceTimer = setInterval(async () => {
                 if (!this.voiceState.in_voice || !this._voiceRoomId) return;
                 try {
-                    const sr = await fetch(`/api/voice/${this._voiceRoomId}/state`);
-                    const state = await sr.json();
-                    
-                    /* Keep token and url intact from original join */
-                    const token = this.voiceState.livekit_token;
-                    const url = this.voiceState.livekit_url;
-                    
-                    this.voiceState = { ...this.voiceState, ...state, livekit_token: token, livekit_url: url };
+                    const sr = await fetch(`/api/voice/${this._voiceRoomId}/state`, { headers: { 'Accept': 'application/json' } });
+                    const state = await this._safeJson(sr, 'Ses API');
+                    if (!sr.ok) return;
+                    if (!state.in_voice && this.voiceState.in_voice) {
+                        showToast('Ses kanalından çıkarıldınız', 'error');
+                        await this._disconnectLocalVoice(false);
+                        this.voiceConnectionStatus = 'idle';
+                    }
+                    this._applyVoiceState(state);
                 } catch(e) {}
-            }, 3000); // Polling reduced to every 3s since LiveKit handles realtime signaling
+            }, 3000);
+        },
+
+        _applyVoiceState(state) {
+            if (!state) return;
+            const token = this.voiceState.livekit_token;
+            const url = this.voiceState.livekit_url;
+            this.voiceState = { ...this.voiceState, ...state, livekit_token: state.livekit_token || token, livekit_url: state.livekit_url || url };
+            if (state.participant) this._applyVoiceParticipant('updated', state.participant);
+            this._refreshSpeakingUsers();
+            this._applyLocalMicState();
+            this._setRemoteAudioMuted(!!this.voiceState.is_deafened);
+        },
+
+        _applyVoiceParticipant(action, participant) {
+            if (!participant || !participant.id) return;
+            if (action === 'kicked' && String(participant.id) === String(this.currentUser.id)) {
+                showToast('Ses kanalından çıkarıldınız', 'error');
+                this.voiceLeave();
+                return;
+            }
+            const list = [...(this.voiceState.participants || [])];
+            const idx = list.findIndex(p => String(p.id) === String(participant.id));
+            if (action === 'kicked') {
+                this.voiceState.participants = list.filter(p => String(p.id) !== String(participant.id));
+                return;
+            }
+            if (idx === -1) list.push(participant);
+            else list[idx] = { ...list[idx], ...participant };
+            this.voiceState.participants = list;
+            if (String(participant.id) === String(this.currentUser.id)) {
+                this.voiceState = { ...this.voiceState, ...participant, in_voice: true };
+                this._applyLocalMicState();
+            }
+            this._refreshSpeakingUsers();
+        },
+
+        _refreshSpeakingUsers() {
+            const speaking = {};
+            for (const p of (this.voiceState.participants || [])) {
+                if (p.is_speaking) speaking[p.id] = true;
+            }
+            this._speakingUsers = { ...speaking, ...this._speakingUsers };
+        },
+
+        async _applyLocalMicState() {
+            const shouldMute = !!this.voiceState.is_muted || !this.voiceState.can_speak || (this.voicePrefs.pushToTalk && !this._pttDown);
+            await this._setLocalMicMuted(shouldMute, false);
+        },
+
+        async _setLocalMicMuted(muted, updateState = true) {
+            if (updateState) this.voiceState.is_muted = muted;
+            if (!this._lkRoom?.localParticipant) return;
+            try {
+                await this._lkRoom.localParticipant.setMicrophoneEnabled(!muted, {
+                    echoCancellation: this.voicePrefs.echoCancellation,
+                    noiseSuppression: this.voicePrefs.noiseSuppression,
+                    autoGainControl: true,
+                }, {
+                    dtx: !!this.voicePrefs.lowBandwidth,
+                    audioBitrate: this.voicePrefs.lowBandwidth ? 16000 : 32000,
+                });
+            } catch(e) {}
+        },
+
+        _setRemoteAudioMuted(muted) {
+            this.voiceState.is_deafened = muted;
+            for (const uid in this._audioEls) {
+                this._audioEls[uid].muted = muted;
+            }
+        },
+
+        _scheduleVoiceReconnect() {
+            if (this._manualVoiceLeave || !this._voiceRoomId) return;
+            clearTimeout(this._voiceReconnectTimer);
+            const delay = Math.min(15000, 1000 * Math.pow(2, this._voiceReconnectAttempts++));
+            this.voiceConnectionStatus = 'reconnecting';
+            this._voiceReconnectTimer = setTimeout(() => this.voiceJoin({ reconnect: true }), delay);
+        },
+
+        async _syncLocalSpeaking(isSpeaking) {
+            if (!this._voiceRoomId || this.voiceState._lastSpeaking === isSpeaking) return;
+            this.voiceState._lastSpeaking = isSpeaking;
+            fetch(`/api/voice/${this._voiceRoomId}/speaking`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                body: JSON.stringify({ is_speaking: isSpeaking })
+            }).catch(() => {});
+        },
+
+        _sendVoiceQuality(quality, reconnected = false) {
+            if (!this._voiceRoomId) return;
+            fetch(`/api/voice/${this._voiceRoomId}/quality`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                body: JSON.stringify({ connection_quality: quality, reconnected })
+            }).catch(() => {});
+        },
+
+        _mapLiveKitQuality(quality) {
+            const raw = String(quality || '').toLowerCase();
+            if (raw.includes('excellent')) return 'excellent';
+            if (raw.includes('good')) return 'good';
+            if (raw.includes('poor') || raw.includes('lost')) return 'poor';
+            if (quality === 3) return 'excellent';
+            if (quality === 2) return 'good';
+            if (quality === 1) return 'poor';
+            return 'unknown';
+        },
+
+        qualityLabel(q) {
+            return ({ excellent: 'Çok iyi', good: 'İyi', poor: 'Zayıf', unknown: 'Bilinmiyor' })[q || 'unknown'] || 'Bilinmiyor';
+        },
+
+        _initPushToTalk() {
+            window.addEventListener('keydown', (e) => {
+                if (!this.voicePrefs.pushToTalk || e.code !== 'Space' || this._pttDown) return;
+                if (['INPUT','TEXTAREA'].includes(document.activeElement?.tagName)) return;
+                this._pttDown = true;
+                this._applyLocalMicState();
+                e.preventDefault();
+            });
+            window.addEventListener('keyup', (e) => {
+                if (!this.voicePrefs.pushToTalk || e.code !== 'Space') return;
+                this._pttDown = false;
+                this._applyLocalMicState();
+                e.preventDefault();
+            });
+        },
+
+        async _safeJson(response, label) {
+            const ct = response.headers.get('content-type') || '';
+            if (!ct.includes('application/json')) {
+                const text = await response.text().catch(() => '');
+                throw new Error(`${label} JSON dönmedi (${response.status}). ${text.slice(0, 80)}`);
+            }
+            return response.json();
         }
     }
 }

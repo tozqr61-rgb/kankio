@@ -8,28 +8,31 @@ use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class MusicStateChanged implements ShouldBroadcastNow
+class UserTyping implements ShouldBroadcastNow
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public function __construct(
         public readonly int $roomId,
-        public readonly array $state,
+        public readonly array $user,
+        public readonly bool $isTyping,
     ) {}
 
-    /** Broadcast on the room's music channel */
     public function broadcastOn(): array
     {
-        return [new PrivateChannel("room.{$this->roomId}.music")];
+        return [new PrivateChannel("room.{$this->roomId}.chat")];
     }
 
     public function broadcastAs(): string
     {
-        return 'music.state';
+        return 'typing';
     }
 
     public function broadcastWith(): array
     {
-        return $this->state;
+        return [
+            'user' => $this->user,
+            'is_typing' => $this->isTyping,
+        ];
     }
 }

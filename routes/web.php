@@ -1,28 +1,31 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\BaglantiKalController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\MessageController;
-use App\Http\Controllers\RoomController;
-use App\Http\Controllers\AdminController;
-use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\MusicController;
+use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\RoomController;
 use App\Http\Controllers\VoiceController;
+use Illuminate\Support\Facades\Route;
 
 // Landing
-Route::get('/', fn() => view('landing'))->name('landing');
+Route::get('/', fn () => view('landing'))->name('landing');
 
 // Maintenance page
-Route::get('/maintenance', fn() => view('maintenance'))->name('maintenance');
+Route::get('/maintenance', fn () => view('maintenance'))->name('maintenance');
 
 // Bağlantıda Kal — doğum günü sayfası
-Route::get('/baglantikal', [App\Http\Controllers\BaglantiKalController::class, 'index'])->name('stay.connected');
-Route::post('/baglantikal/kaydet', [App\Http\Controllers\BaglantiKalController::class, 'save'])->name('stay.save');
-Route::post('/baglantikal/audio', [App\Http\Controllers\BaglantiKalController::class, 'uploadAudio'])->name('stay.audio');
+Route::get('/baglantikal', [BaglantiKalController::class, 'index'])->name('stay.connected');
+Route::middleware(['auth', 'throttle:10,1'])->group(function () {
+    Route::post('/baglantikal/kaydet', [BaglantiKalController::class, 'save'])->name('stay.save');
+    Route::post('/baglantikal/audio', [BaglantiKalController::class, 'uploadAudio'])->name('stay.audio');
+});
 
 // PWA offline fallback (cached by service worker)
-Route::get('/offline', fn() => view('offline'))->name('pwa.offline');
+Route::get('/offline', fn () => view('offline'))->name('pwa.offline');
 
 // Auth
 Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
@@ -35,11 +38,12 @@ Route::middleware('auth')->group(function () {
     Route::get('/chat', [ChatController::class, 'index'])->name('chat.index');
     Route::get('/chat/{roomId}', [ChatController::class, 'room'])->name('chat.room');
 
-    // Polling API
+    // Chat API (Realtime primary, polling fallback)
     Route::get('/api/chat/{roomId}/messages', [ChatController::class, 'poll'])->name('api.poll');
     Route::post('/api/chat/{roomId}/messages', [MessageController::class, 'store'])->name('api.message.store');
     Route::delete('/api/chat/{roomId}/messages/{messageId}', [MessageController::class, 'destroy'])->name('api.message.destroy');
     Route::post('/api/chat/{roomId}/seen', [ChatController::class, 'markSeen'])->name('api.message.seen');
+    Route::post('/api/chat/{roomId}/typing', [ChatController::class, 'typing'])->name('api.message.typing');
     Route::get('/api/chat/{roomId}/archived', [ChatController::class, 'archivedMessages'])->name('api.message.archived');
 
     // Rooms API
@@ -67,7 +71,14 @@ Route::middleware('auth')->group(function () {
     Route::post('/api/voice/{roomId}/join', [VoiceController::class, 'join'])->name('api.voice.join');
     Route::post('/api/voice/{roomId}/leave', [VoiceController::class, 'leave'])->name('api.voice.leave');
     Route::post('/api/voice/{roomId}/mute', [VoiceController::class, 'toggleMute'])->name('api.voice.mute');
+    Route::post('/api/voice/{roomId}/deafen', [VoiceController::class, 'toggleDeafen'])->name('api.voice.deafen');
+    Route::post('/api/voice/{roomId}/speaking', [VoiceController::class, 'speaking'])->name('api.voice.speaking');
+    Route::post('/api/voice/{roomId}/quality', [VoiceController::class, 'quality'])->name('api.voice.quality');
     Route::get('/api/voice/{roomId}/state', [VoiceController::class, 'state'])->name('api.voice.state');
+    Route::post('/api/voice/{roomId}/mute-all', [VoiceController::class, 'muteAll'])->name('api.voice.mute_all');
+    Route::delete('/api/voice/{roomId}/participants/{userId}', [VoiceController::class, 'kick'])->name('api.voice.kick');
+    Route::post('/api/voice/{roomId}/participants/{userId}/speak', [VoiceController::class, 'setSpeakPermission'])->name('api.voice.speak_permission');
+    Route::post('/api/voice/{roomId}/settings', [VoiceController::class, 'settings'])->name('api.voice.settings');
 
     // Admin
     Route::middleware('admin')->prefix('admin')->group(function () {
@@ -75,6 +86,7 @@ Route::middleware('auth')->group(function () {
         Route::get('/users', [AdminController::class, 'users'])->name('admin.users');
         Route::get('/rooms', [AdminController::class, 'rooms'])->name('admin.rooms');
         Route::get('/invites', [AdminController::class, 'invites'])->name('admin.invites');
+        Route::get('/metrics', [AdminController::class, 'metrics'])->name('admin.metrics');
 
         Route::post('/users/{userId}/ban', [AdminController::class, 'banUser'])->name('admin.ban');
         Route::post('/users/{userId}/role', [AdminController::class, 'toggleAdmin'])->name('admin.toggle.role');

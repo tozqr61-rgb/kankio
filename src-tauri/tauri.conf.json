@@ -33,7 +33,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' https://kank.com.tr; connect-src 'self' https://kank.com.tr wss://kank.com.tr wss://*.livekit.cloud https://*.livekit.cloud; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://kank.com.tr https://img.youtube.com; media-src 'self' blob: https://kank.com.tr; frame-src https://www.youtube.com https://www.youtube-nocookie.com"
     },
     "trayIcon": {
       "iconPath": "icons/icon.png",
