@@ -1100,6 +1100,8 @@ function chatRoom() {
         _voiceReconnectAttempts: 0,
         _voiceReconnectTimer: null,
         _voiceJoinInFlight: false,      /* prevents concurrent voiceJoin() races */
+        _micToggleInFlight: false,      /* prevents concurrent setMicrophoneEnabled() calls */
+        _lastAppliedMicEnabled: null, /* dedup mic state applications */
         voiceConnectionStatus: 'idle', /* idle | connecting | connected | reconnecting | failed */
         voicePrefs: { noiseSuppression: true, echoCancellation: true, pushToTalk: false, lowBandwidth: false },
         _pttDown: false,
@@ -2195,6 +2197,8 @@ function chatRoom() {
 
         async _disconnectLocalVoice(notifyServer) {
             this._speakingUsers = {};
+            this._lastAppliedMicEnabled = null;
+            this._micToggleInFlight = false;
             if (this._lkRoom) {
                 try { await this._lkRoom.disconnect(); } catch(e) {}
                 this._lkRoom = null;
@@ -2362,6 +2366,11 @@ function chatRoom() {
                 return;
             }
             const shouldMute = !!this.voiceState.is_muted || !this.voiceState.can_speak || (this.voicePrefs.pushToTalk && !this._pttDown);
+            if (this._lastAppliedMicEnabled === shouldMute) {
+                console.log('[voice] _applyLocalMicState dedup: already ' + shouldMute);
+                return;
+            }
+            this._lastAppliedMicEnabled = shouldMute;
             await this._setLocalMicMuted(shouldMute, false);
         },
 
@@ -2371,11 +2380,16 @@ function chatRoom() {
                 console.log('[voice] _setLocalMicMuted skipped: no localParticipant');
                 return;
             }
+            if (this._micToggleInFlight) {
+                console.log('[voice] _setLocalMicMuted skipped: toggle already in flight');
+                return;
+            }
+            this._micToggleInFlight = true;
             try {
                 console.log('[voice] _setLocalMicMuted: enabled=' + !muted);
                 await this._lkRoom.localParticipant.setMicrophoneEnabled(!muted, {
-                    echoCancellation: this.voicePrefs.echoCancellation,
-                    noiseSuppression: this.voicePrefs.noiseSuppression,
+                    echoCancellation: !!this.voicePrefs.echoCancellation,
+                    noiseSuppression: !!this.voicePrefs.noiseSuppression,
                     autoGainControl: true,
                 }, {
                     dtx: !!this.voicePrefs.lowBandwidth,
@@ -2383,6 +2397,9 @@ function chatRoom() {
                 });
             } catch(e) {
                 console.warn('[voice] _setLocalMicMuted error:', e);
+                this._lastAppliedMicEnabled = null; /* allow retry on failure */
+            } finally {
+                this._micToggleInFlight = false;
             }
         },
 
