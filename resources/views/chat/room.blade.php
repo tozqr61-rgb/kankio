@@ -1017,6 +1017,7 @@ const KankioVoiceRuntime = {
     audioEls: {},
     micToggleInFlight: false,
     lastAppliedMicEnabled: null,
+    permissionStream: null,
 };
 
 function getVoiceRoom() { return KankioVoiceRuntime.lkRoom; }
@@ -1026,7 +1027,24 @@ function resetVoiceRuntime() {
     KankioVoiceRuntime.audioEls = {};
     KankioVoiceRuntime.micToggleInFlight = false;
     KankioVoiceRuntime.lastAppliedMicEnabled = null;
+    KankioVoiceRuntime.permissionStream = null;
 }
+
+function stopPermissionStreamIfAny() {
+    if (!KankioVoiceRuntime.permissionStream) return;
+    for (const track of KankioVoiceRuntime.permissionStream.getTracks()) {
+        try { track.stop(); } catch (_) {}
+    }
+    KankioVoiceRuntime.permissionStream = null;
+}
+
+window.addEventListener('pagehide', stopPermissionStreamIfAny);
+window.addEventListener('beforeunload', stopPermissionStreamIfAny);
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' && !getVoiceRoom()) {
+        stopPermissionStreamIfAny();
+    }
+});
 
 function chatRoom() {
     return {
@@ -2072,7 +2090,8 @@ function chatRoom() {
             try {
                 if (!isReconnect) {
                     try {
-                        await navigator.mediaDevices.getUserMedia({ audio: true });
+                        stopPermissionStreamIfAny();
+                        KankioVoiceRuntime.permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                     } catch(e) {
                         this.voiceConnectionStatus = 'failed';
                         showToast('Mikrofon erişimi reddedildi', 'error');
@@ -2249,6 +2268,15 @@ function chatRoom() {
                 }
             }
             KankioVoiceRuntime.audioEls = {};
+
+            if (KankioVoiceRuntime.permissionStream) {
+                for (const track of KankioVoiceRuntime.permissionStream.getTracks()) {
+                    try { track.stop(); } catch (e) {
+                        console.warn('[voice] failed to stop permission stream track', e);
+                    }
+                }
+                KankioVoiceRuntime.permissionStream = null;
+            }
 
             resetVoiceRuntime();
             setVoiceRoom(null);
