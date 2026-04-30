@@ -1099,6 +1099,7 @@ function chatRoom() {
         _manualVoiceLeave: false,
         _voiceReconnectAttempts: 0,
         _voiceReconnectTimer: null,
+        _voiceJoinInFlight: false,      /* prevents concurrent voiceJoin() races */
         voiceConnectionStatus: 'idle', /* idle | connecting | connected | reconnecting | failed */
         voicePrefs: { noiseSuppression: true, echoCancellation: true, pushToTalk: false, lowBandwidth: false },
         _pttDown: false,
@@ -2031,23 +2032,39 @@ function chatRoom() {
         /* ══════════ VOICE CHAT (LiveKit) ═══════════ */
         async voiceJoin(options = {}) {
             const isReconnect = !!options.reconnect;
+
+            if (this._voiceJoinInFlight) {
+                console.log('[voice] voiceJoin rejected: join already in flight');
+                return;
+            }
+            if ((this.voiceConnectionStatus === 'connecting' || this.voiceConnectionStatus === 'reconnecting') && !isReconnect) {
+                console.log('[voice] voiceJoin rejected: status=' + this.voiceConnectionStatus);
+                return;
+            }
+            if (this._lkRoom && this.voiceState?.in_voice && !isReconnect) {
+                console.log('[voice] voiceJoin rejected: already connected and in_voice');
+                return;
+            }
+
+            this._voiceJoinInFlight = true;
             this._manualVoiceLeave = false;
             this.voiceConnectionStatus = isReconnect ? 'reconnecting' : 'connecting';
-
             this._playerMuted = false;
             this._ensureIframeReady();
 
-            if (!isReconnect) {
-                try {
-                    await navigator.mediaDevices.getUserMedia({ audio: true });
-                } catch(e) {
-                    this.voiceConnectionStatus = 'failed';
-                    showToast('Mikrofon erişimi reddedildi', 'error'); return;
-                }
-            }
-
             try {
+                if (!isReconnect) {
+                    try {
+                        await navigator.mediaDevices.getUserMedia({ audio: true });
+                    } catch(e) {
+                        this.voiceConnectionStatus = 'failed';
+                        showToast('Mikrofon erişimi reddedildi', 'error');
+                        return;
+                    }
+                }
+
                 this._voiceRoomId = this._roomId;
+                console.log('[voice] voiceJoin starting. room=' + this._voiceRoomId + ' reconnect=' + isReconnect);
                 const r = await fetch(`/api/voice/${this._voiceRoomId}/join`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
@@ -2068,9 +2085,10 @@ function chatRoom() {
                 }
 
                 this._applyVoiceState(state);
-                await this._connectLiveKit(state);
+                await this._connectLiveKit(state, options);
                 this._voiceReconnectAttempts = 0;
                 this.voiceConnectionStatus = 'connected';
+                console.log('[voice] voiceJoin succeeded. room=' + this._voiceRoomId);
                 showToast(isReconnect ? 'Ses kanalına yeniden bağlanıldı' : 'Ses kanalına bağlanıldı', 'success');
                 this._startVoicePolling();
 
@@ -2079,19 +2097,29 @@ function chatRoom() {
                     this._applyMusicState(this.musicState);
                 }
             } catch (error) {
+                console.error('[voice] voiceJoin failed:', error);
                 this.voiceConnectionStatus = 'failed';
                 showToast('Ses kanalına bağlanılamadı: ' + error.message, 'error');
                 this._scheduleVoiceReconnect();
+            } finally {
+                this._voiceJoinInFlight = false;
             }
         },
 
-        async _connectLiveKit(state) {
+        async _connectLiveKit(state, options = {}) {
             const Room = LivekitClient.Room;
             const RoomEvent = LivekitClient.RoomEvent;
 
             if (this._lkRoom) {
-                try { await this._lkRoom.disconnect(); } catch(e) {}
-                this._lkRoom = null;
+                const shouldDisconnect = options.forceReconnect || this._lkRoom.state === 'disconnected' || !this._lkRoom.localParticipant;
+                if (shouldDisconnect) {
+                    console.log('[voice] _connectLiveKit: disconnecting existing room. state=' + this._lkRoom.state);
+                    try { await this._lkRoom.disconnect(); } catch(e) {}
+                    this._lkRoom = null;
+                } else {
+                    console.log('[voice] _connectLiveKit: reusing healthy room. state=' + this._lkRoom.state);
+                    return;
+                }
             }
 
             this._lkRoom = new Room({ adaptiveStream: true, dynacast: true });
@@ -2329,14 +2357,22 @@ function chatRoom() {
         },
 
         async _applyLocalMicState() {
+            if (!this._lkRoom?.localParticipant) {
+                console.log('[voice] _applyLocalMicState skipped: no localParticipant');
+                return;
+            }
             const shouldMute = !!this.voiceState.is_muted || !this.voiceState.can_speak || (this.voicePrefs.pushToTalk && !this._pttDown);
             await this._setLocalMicMuted(shouldMute, false);
         },
 
         async _setLocalMicMuted(muted, updateState = true) {
             if (updateState) this.voiceState.is_muted = muted;
-            if (!this._lkRoom?.localParticipant) return;
+            if (!this._lkRoom?.localParticipant) {
+                console.log('[voice] _setLocalMicMuted skipped: no localParticipant');
+                return;
+            }
             try {
+                console.log('[voice] _setLocalMicMuted: enabled=' + !muted);
                 await this._lkRoom.localParticipant.setMicrophoneEnabled(!muted, {
                     echoCancellation: this.voicePrefs.echoCancellation,
                     noiseSuppression: this.voicePrefs.noiseSuppression,
@@ -2345,7 +2381,9 @@ function chatRoom() {
                     dtx: !!this.voicePrefs.lowBandwidth,
                     audioBitrate: this.voicePrefs.lowBandwidth ? 16000 : 32000,
                 });
-            } catch(e) {}
+            } catch(e) {
+                console.warn('[voice] _setLocalMicMuted error:', e);
+            }
         },
 
         _setRemoteAudioMuted(muted) {
@@ -2360,6 +2398,7 @@ function chatRoom() {
             clearTimeout(this._voiceReconnectTimer);
             const delay = Math.min(15000, 1000 * Math.pow(2, this._voiceReconnectAttempts++));
             this.voiceConnectionStatus = 'reconnecting';
+            console.log('[voice] _scheduleVoiceReconnect: attempt=' + this._voiceReconnectAttempts + ' delay=' + delay + 'ms');
             this._voiceReconnectTimer = setTimeout(() => this.voiceJoin({ reconnect: true }), delay);
         },
 
