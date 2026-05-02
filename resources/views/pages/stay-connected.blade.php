@@ -135,7 +135,7 @@
         .admin-input::placeholder { color:rgba(255,255,255,.18); }
     </style>
 </head>
-<body x-data="bday({ isAdmin: @json($isAdmin ?? false), initialContent: @json($initialContent ?? []) })" x-init="init()" @click="rx($event)">
+<body x-data="bday({ isAdmin: @json($isAdmin ?? false) })" x-init="init()" @click="rx($event)">
 
 <!-- ── Erisim kilidi ── -->
 <div x-show="locked"
@@ -265,7 +265,7 @@
     <div class="max-w-3xl mx-auto">
         <div class="flex flex-col items-center gap-1 mb-3">
             <div class="s-label"><span>dijital başarımlar</span></div>
-            <h2 class="font-serif font-light" style="font-size:2.5rem;color:rgba(255,255,255,.85)">İller Sınıfı — Başarım Duvarı</h2>
+            <h2 class="font-serif font-light" style="font-size:2.5rem;color:rgba(255,255,255,.85)">Başarım Duvarı</h2>
             <p style="font-size:.75rem;color:rgba(255,255,255,.22);margin-top:.25rem">Her kartı tıkla — kilidi aç</p>
         </div>
 
@@ -661,6 +661,8 @@
 @endif
 
 <script>
+window.BAGLANTIKAL_INITIAL_CONTENT = @json($initialContent ?? []);
+
 function bday(c) {
     return {
         locked: false, accessPin: '', accessErr: false, accessLoading: false,
@@ -669,7 +671,7 @@ function bday(c) {
         letterOpen: false, letterStage: 0, pin: '', letterErr: false, letterLoading: false,
         adminOpen: false, adminSekme: 'muzik', adminKaydediliyor: false, adminTamam: false, adminError: '',
         isAdmin: !!(c && c.isAdmin),
-        initialContent: (c && c.initialContent) || {},
+        initialContent: window.BAGLANTIKAL_INITIAL_CONTENT || {},
         _playingBoxAudio: null, _boxAudioEl: null,
         muzikId: '',
         mektup: {p1:'',p2:'',p3:'',p4:''},
