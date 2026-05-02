@@ -1,9 +1,9 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Selen CÄ±zz ZamansÄ±z Bakma Ã‡Ä±k Hemen</title>
+    <title>Selen Cızz Zamansız Bakma Çık Hemen</title>
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <script src="https://cdn.tailwindcss.com"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
@@ -95,7 +95,7 @@
         }
         .hero-in { animation: heroIn 1.6s cubic-bezier(.16,1,.3,1) both; }
 
-        /* â”€â”€ Letter modal â”€â”€ */
+        /* ── Letter modal ── */
         @keyframes sealGlow {
             0%,100%{ box-shadow:0 0 22px rgba(200,0,0,.35),0 3px 10px rgba(0,0,0,.7); }
             50%    { box-shadow:0 0 40px rgba(200,0,0,.6), 0 3px 10px rgba(0,0,0,.7); }
@@ -117,7 +117,7 @@
         }
         .letter-slide { animation: letterReveal .95s cubic-bezier(.16,1,.3,1) both; }
 
-        /* â”€â”€ YÃ¶netim paneli â”€â”€ */
+        /* ── Yönetim paneli ── */
         .admin-input {
             width:100%; display:block;
             background:rgba(255,255,255,.04);
@@ -137,7 +137,7 @@
 </head>
 <body x-data="bday({ isAdmin: @json($isAdmin ?? false) })" x-init="init()" @click="rx($event)">
 
-<!-- â”€â”€ Erisim kilidi â”€â”€ -->
+<!-- ── Erisim kilidi ── -->
 <div x-show="locked"
      class="fixed inset-0 flex flex-col items-center justify-center text-center p-6"
      style="background:#030303;z-index:9998">
@@ -172,7 +172,7 @@
     </div>
 </div>
 
-<!-- â”€â”€ Back button â”€â”€ -->
+<!-- ── Back button ── -->
 @unless($embedded ?? false)
 <a href="{{ url('/chat') }}"
    class="fixed top-5 left-5 z-50 flex items-center gap-2 transition-all duration-300"
@@ -182,34 +182,34 @@
     <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
         <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/>
     </svg>
-    Kankio'ya DÃ¶n
+    Kankio'ya Dön
 </a>
 @endunless
 
-<!-- â”€â”€ Floating reactions â”€â”€ -->
+<!-- ── Floating reactions ── -->
 <template x-for="r in reactions" :key="r.id">
     <div class="rx" :style="`left:${r.x}px;top:${r.y}px`" x-text="r.e"></div>
 </template>
 
-<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+<!-- ════════════════════════════════════════
      HERO
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+════════════════════════════════════════ -->
 <section class="relative min-h-screen flex flex-col items-center justify-center text-center px-4 overflow-hidden">
     <div id="starfield" class="absolute inset-0 overflow-hidden pointer-events-none"></div>
     <div class="absolute inset-0 pointer-events-none" style="background:radial-gradient(ellipse 80% 60% at 50% 40%,rgba(251,191,36,.05) 0%,transparent 60%)"></div>
     <div class="absolute inset-0 pointer-events-none" style="background:radial-gradient(ellipse 50% 40% at 15% 80%,rgba(139,92,246,.06) 0%,transparent 50%)"></div>
 
     <div class="relative z-10 hero-in flex flex-col items-center gap-5">
-        <div class="s-label"><span>Ã¶zel gÃ¼n</span></div>
+        <div class="s-label"><span>özel gün</span></div>
 
         <h1 class="font-serif font-light leading-none tracking-tight"
             style="font-size:clamp(3.2rem,11vw,7.5rem);color:rgba(255,255,255,.9)">
-            DoÄŸum GÃ¼nÃ¼n<br>
+            Doğum Günün<br>
             <em style="font-style:italic;color:rgba(251,191,36,.78)">Kutlu Olsun</em>
         </h1>
 
         <p style="font-size:.72rem;letter-spacing:.18em;color:rgba(255,255,255,.25);text-transform:uppercase">
-            â€” ekrana tÄ±kla Â· reaksiyon gÃ¶nder â€”
+            — ekrana tıkla · reaksiyon gönder —
         </p>
 
         <button @click.stop="boom()"
@@ -217,30 +217,30 @@
                 style="border:1px solid rgba(251,191,36,.22);color:rgba(251,191,36,.7);background:rgba(251,191,36,.03)"
                 onmouseover="this.style.borderColor='rgba(251,191,36,.5)';this.style.color='rgba(251,191,36,1)';this.style.background='rgba(251,191,36,.07)'"
                 onmouseout="this.style.borderColor='rgba(251,191,36,.22)';this.style.color='rgba(251,191,36,.7)';this.style.background='rgba(251,191,36,.03)'">
-            ğŸ‰ Konfeti Patlat
+            🎉 Konfeti Patlat
         </button>
     </div>
 
     <div class="absolute bottom-7 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2" style="color:rgba(255,255,255,.12)">
-        <span style="font-size:.6rem;letter-spacing:.3em;text-transform:uppercase">KaydÄ±r</span>
+        <span style="font-size:.6rem;letter-spacing:.3em;text-transform:uppercase">Kaydır</span>
         <div class="w-px h-10" style="background:linear-gradient(to bottom,rgba(255,255,255,.18),transparent)"></div>
     </div>
 </section>
 
-<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-     MÃœZÄ°K
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<!-- ════════════════════════════════════════
+     MÜZİK
+════════════════════════════════════════ -->
 <section class="py-24 px-4" @click.stop>
     <div class="max-w-2xl mx-auto">
         <div class="flex flex-col items-center gap-1 mb-8">
-            <div class="s-label"><span>mÃ¼zik</span></div>
-            <h2 class="font-serif font-light" style="font-size:2.5rem;color:rgba(255,255,255,.85)">MÃ¼zik</h2>
+            <div class="s-label"><span>müzik</span></div>
+            <h2 class="font-serif font-light" style="font-size:2.5rem;color:rgba(255,255,255,.85)">Müzik</h2>
         </div>
 
         <div class="rounded-3xl overflow-hidden" style="background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05)">
             <div class="px-5 py-4 flex items-center gap-3" style="border-bottom:1px solid rgba(255,255,255,.04)">
                 <div class="h-2 w-2 rounded-full" style="background:rgba(251,191,36,.8);animation:pulse 2s infinite"></div>
-                <p style="font-size:.65rem;letter-spacing:.25em;text-transform:uppercase;color:rgba(255,255,255,.28)">Åu an Ã§alÄ±yor</p>
+                <p style="font-size:.65rem;letter-spacing:.25em;text-transform:uppercase;color:rgba(255,255,255,.28)">Şu an çalıyor</p>
             </div>
             <template x-if="muzikId">
                 <div class="aspect-video">
@@ -250,23 +250,23 @@
             </template>
             <template x-if="!muzikId">
                 <div class="flex flex-col items-center justify-center gap-3 py-14" style="color:rgba(255,255,255,.18)">
-                    <span style="font-size:2.5rem">ğŸµ</span>
-                    <p style="font-size:.65rem;letter-spacing:.25em;text-transform:uppercase">YÃ¶netim panelinden ÅŸarkÄ± ekle</p>
+                    <span style="font-size:2.5rem">🎵</span>
+                    <p style="font-size:.65rem;letter-spacing:.25em;text-transform:uppercase">Yönetim panelinden şarkı ekle</p>
                 </div>
             </template>
         </div>
     </div>
 </section>
 
-<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+<!-- ════════════════════════════════════════
      ACHIEVEMENT WALL
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+════════════════════════════════════════ -->
 <section class="py-24 px-4" @click.stop>
     <div class="max-w-3xl mx-auto">
         <div class="flex flex-col items-center gap-1 mb-3">
-            <div class="s-label"><span>dijital baÅŸarÄ±mlar</span></div>
-            <h2 class="font-serif font-light" style="font-size:2.5rem;color:rgba(255,255,255,.85)">Ä°ller SÄ±nÄ±fÄ± â€” BaÅŸarÄ±m DuvarÄ±</h2>
-            <p style="font-size:.75rem;color:rgba(255,255,255,.22);margin-top:.25rem">Her kartÄ± tÄ±kla â€” kilidi aÃ§</p>
+            <div class="s-label"><span>dijital başarımlar</span></div>
+            <h2 class="font-serif font-light" style="font-size:2.5rem;color:rgba(255,255,255,.85)">İller Sınıfı — Başarım Duvarı</h2>
+            <p style="font-size:.75rem;color:rgba(255,255,255,.22);margin-top:.25rem">Her kartı tıkla — kilidi aç</p>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-8">
@@ -286,7 +286,7 @@
                     <div class="flex-1 min-w-0">
                         <p class="transition-colors duration-500" style="font-size:.6rem;letter-spacing:.22em;text-transform:uppercase;font-weight:600"
                            :style="a.u ? 'color:rgba(251,191,36,.8)' : 'color:rgba(255,255,255,.18)'">
-                            BaÅŸarÄ±m AÃ§Ä±ldÄ±
+                            Başarım Açıldı
                         </p>
                         <p class="mt-1 font-medium" style="font-size:.85rem;color:rgba(255,255,255,.82)" x-text="a.title"></p>
                         <p class="mt-0.5 transition-colors duration-500" style="font-size:.72rem"
@@ -295,8 +295,8 @@
                     </div>
 
                     <div class="shrink-0 text-xl">
-                        <span x-show="!a.u" style="color:rgba(255,255,255,.14)">ğŸ”’</span>
-                        <span x-show="a.u">ğŸ†</span>
+                        <span x-show="!a.u" style="color:rgba(255,255,255,.14)">🔒</span>
+                        <span x-show="a.u">🏆</span>
                     </div>
                 </div>
             </template>
@@ -304,9 +304,9 @@
     </div>
 </section>
 
-<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-     ANI MÃœZESÄ°
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<!-- ════════════════════════════════════════
+     ANI MÜZESİ
+════════════════════════════════════════ -->
 <section class="py-24 px-4" @click.stop>
     <div class="max-w-3xl mx-auto">
         <div class="flex flex-col items-center gap-1 mb-8">
@@ -315,10 +315,10 @@
                         style="background:none;border:none;cursor:pointer;padding:0;font-size:.6rem;letter-spacing:.35em;text-transform:uppercase;color:rgba(255,255,255,.22);display:flex;align-items:center;gap:.35rem"
                         onmouseover="this.style.color='rgba(255,255,255,.65)'"
                         onmouseout="this.style.color='rgba(255,255,255,.22)'">
-                    anÄ±lar <span style="font-size:.75rem;opacity:.55">&#9993;</span>
+                    anılar <span style="font-size:.75rem;opacity:.55">&#9993;</span>
                 </button>
             </div>
-            <h2 class="font-serif font-light" style="font-size:2.5rem;color:rgba(255,255,255,.85)">AnÄ± MÃ¼zesi</h2>
+            <h2 class="font-serif font-light" style="font-size:2.5rem;color:rgba(255,255,255,.85)">Anı Müzesi</h2>
         </div>
 
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -364,15 +364,15 @@
     </div>
 </div>
 
-<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-     GÄ°ZEMLÄ° KUTULAR
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<!-- ════════════════════════════════════════
+     GİZEMLİ KUTULAR
+════════════════════════════════════════ -->
 <section class="py-24 px-4" @click.stop>
     <div class="max-w-3xl mx-auto">
         <div class="flex flex-col items-center gap-1 mb-4">
-            <div class="s-label"><span>sÃ¼rpriz</span></div>
+            <div class="s-label"><span>sürpriz</span></div>
             <h2 class="font-serif font-light" style="font-size:2.5rem;color:rgba(255,255,255,.85)">Gizemli Kutular</h2>
-            <p style="font-size:.75rem;color:rgba(255,255,255,.22)">TÄ±kla Â· Ã‡evir Â· KeÅŸfet</p>
+            <p style="font-size:.75rem;color:rgba(255,255,255,.22)">Tıkla · Çevir · Keşfet</p>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-10">
@@ -383,7 +383,7 @@
                         <div class="flip-face rounded-3xl flex flex-col items-center justify-center gap-4"
                              :style="`background:${b.bg};border:1px solid rgba(255,255,255,.06)`">
                             <span class="text-5xl" x-text="b.fi"></span>
-                            <p style="font-size:.6rem;letter-spacing:.28em;text-transform:uppercase;color:rgba(255,255,255,.25)">TÄ±kla</p>
+                            <p style="font-size:.6rem;letter-spacing:.28em;text-transform:uppercase;color:rgba(255,255,255,.25)">Tıkla</p>
                         </div>
                         <!-- Back -->
                         <div class="flip-back flip-face rounded-3xl flex flex-col items-center justify-center gap-3 p-6 text-center"
@@ -395,7 +395,7 @@
                                 <button @click.stop="playBoxAudio(b)"
                                     class="mt-2 flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium transition-all"
                                     :style="(_playingBoxAudio === i) ? 'background:rgba(239,68,68,.15);color:rgba(248,113,113,1);border:1px solid rgba(239,68,68,.25)' : 'background:rgba(251,191,36,.1);color:rgba(251,191,36,1);border:1px solid rgba(251,191,36,.2)'"
-                                    x-text="(_playingBoxAudio === i) ? 'â¸ Durdur' : 'ğŸ”Š Sesli MesajÄ± Dinle'">
+                                    x-text="(_playingBoxAudio === i) ? '⏸ Durdur' : '🔊 Sesli Mesajı Dinle'">
                                 </button>
                             </template>
                         </div>
@@ -406,26 +406,26 @@
     </div>
 </section>
 
-<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+<!-- ════════════════════════════════════════
      FOOTER
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+════════════════════════════════════════ -->
 <footer class="py-16 text-center">
-    <p class="font-serif font-light italic" style="font-size:1.8rem;color:rgba(255,255,255,.18)">BaÄŸlantÄ±da Kal</p>
-    <p style="font-size:.6rem;letter-spacing:.4em;text-transform:uppercase;color:rgba(255,255,255,.1);margin-top:.5rem">kankio Â· {{ date('Y') }}</p>
+    <p class="font-serif font-light italic" style="font-size:1.8rem;color:rgba(255,255,255,.18)">Bağlantıda Kal</p>
+    <p style="font-size:.6rem;letter-spacing:.4em;text-transform:uppercase;color:rgba(255,255,255,.1);margin-top:.5rem">kankio · {{ date('Y') }}</p>
     @if($isAdmin ?? false)
     <button x-show="!locked" @click.stop="adminOpen=true"
             class="mt-3 block mx-auto transition-colors duration-300"
             style="font-size:.55rem;letter-spacing:.2em;text-transform:uppercase;color:rgba(255,255,255,.07);background:none;border:none;cursor:pointer"
             onmouseover="this.style.color='rgba(255,255,255,.38)'"
             onmouseout="this.style.color='rgba(255,255,255,.07)'">
-        yÃ¶net
+        yönet
     </button>
     @endif
 </footer>
 
-<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+<!-- ════════════════════════════════════════
      MEKTUP MODALI
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+════════════════════════════════════════ -->
 <div x-show="letterOpen" x-cloak @click="letterOpen=false"
      class="fixed inset-0 z-50 flex items-center justify-center p-4"
      style="background:rgba(0,0,0,.93);backdrop-filter:blur(28px)">
@@ -523,25 +523,25 @@
     </div>
 </div>
 
-<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-     YÃ–NETÄ°M PANELÄ°
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<!-- ════════════════════════════════════════
+     YÖNETİM PANELİ
+════════════════════════════════════════ -->
 @if($isAdmin ?? false)
 <div x-show="adminOpen" x-cloak @click.self="adminOpen=false"
      class="fixed inset-0 z-[9997] overflow-y-auto"
      style="background:rgba(0,0,0,.93);backdrop-filter:blur(22px);padding:1rem">
     <div class="max-w-2xl mx-auto my-8 rounded-3xl p-6" style="background:#0d0d0d;border:1px solid rgba(255,255,255,.07)">
 
-        <!-- BaÅŸlÄ±k -->
+        <!-- Başlık -->
         <div class="flex items-center justify-between mb-6">
-            <h2 class="font-serif font-light" style="font-size:1.6rem;color:rgba(255,255,255,.78)">Sayfa YÃ¶netimi</h2>
+            <h2 class="font-serif font-light" style="font-size:1.6rem;color:rgba(255,255,255,.78)">Sayfa Yönetimi</h2>
             <button @click.stop="adminOpen=false"
                     style="color:rgba(255,255,255,.3);background:none;border:none;cursor:pointer;font-size:1.2rem;line-height:1">&#10005;</button>
         </div>
 
         <!-- Sekmeler -->
         <div class="flex gap-2 mb-6 flex-wrap">
-            <template x-for="s in [{k:'muzik',t:'MÃ¼zik'},{k:'basarim',t:'BaÅŸarÄ±mlar'},{k:'ani',t:'AnÄ±lar'},{k:'kutu',t:'Kutular'},{k:'mektup',t:'Mektup'}]" :key="s.k">
+            <template x-for="s in [{k:'muzik',t:'Müzik'},{k:'basarim',t:'Başarımlar'},{k:'ani',t:'Anılar'},{k:'kutu',t:'Kutular'},{k:'mektup',t:'Mektup'}]" :key="s.k">
                 <button @click.stop="adminSekme=s.k"
                         class="px-4 py-2 rounded-full text-xs border transition-all duration-200"
                         :style="adminSekme===s.k
@@ -551,40 +551,40 @@
             </template>
         </div>
 
-        <!-- MÃ¼zik -->
+        <!-- Müzik -->
         <div x-show="adminSekme==='muzik'" class="space-y-3">
             <p class="text-xs tracking-widest uppercase mb-2" style="color:rgba(255,255,255,.3)">YouTube Video ID</p>
-            <input x-model="muzikId" type="text" placeholder="Ã¶rn: dQw4w9WgXcQ" class="admin-input">
+            <input x-model="muzikId" type="text" placeholder="örn: dQw4w9WgXcQ" class="admin-input">
             <p class="mt-2" style="font-size:.62rem;color:rgba(255,255,255,.2)">
-                youtube.com/watch?v=<strong style="color:rgba(251,191,36,.5)">VIDEO_ID</strong> kÄ±smÄ±nÄ± gir
+                youtube.com/watch?v=<strong style="color:rgba(251,191,36,.5)">VIDEO_ID</strong> kısmını gir
             </p>
         </div>
 
-        <!-- BaÅŸarÄ±mlar -->
+        <!-- Başarımlar -->
         <div x-show="adminSekme==='basarim'" class="space-y-3">
             <template x-for="(a, i) in achievements" :key="i">
                 <div class="p-4 rounded-2xl space-y-2" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05)">
                     <div class="flex items-center gap-2 mb-1">
                         <span class="text-lg" x-text="a.icon"></span>
-                        <span class="text-xs" style="color:rgba(255,255,255,.3)" x-text="`BaÅŸarÄ±m ${i+1}`"></span>
+                        <span class="text-xs" style="color:rgba(255,255,255,.3)" x-text="`Başarım ${i+1}`"></span>
                     </div>
-                    <input x-model="a.title" type="text" placeholder="BaÅŸlÄ±k" class="admin-input">
-                    <textarea x-model="a.desc" rows="2" placeholder="AÃ§Ä±klama" class="admin-input"></textarea>
+                    <input x-model="a.title" type="text" placeholder="Başlık" class="admin-input">
+                    <textarea x-model="a.desc" rows="2" placeholder="Açıklama" class="admin-input"></textarea>
                 </div>
             </template>
         </div>
 
-        <!-- AnÄ±lar -->
+        <!-- Anılar -->
         <div x-show="adminSekme==='ani'" class="space-y-3">
             <template x-for="(m, i) in memories" :key="i">
                 <div class="p-4 rounded-2xl space-y-2" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05)">
                     <div class="flex items-center gap-2 mb-1">
                         <span class="text-lg" x-text="m.icon"></span>
-                        <span class="text-xs" style="color:rgba(255,255,255,.3)" x-text="`AnÄ± ${i+1}`"></span>
+                        <span class="text-xs" style="color:rgba(255,255,255,.3)" x-text="`Anı ${i+1}`"></span>
                     </div>
-                    <input x-model="m.caption" type="text" placeholder="BaÅŸlÄ±k" class="admin-input">
-                    <input x-model="m.detail" type="text" placeholder="AÃ§Ä±klama" class="admin-input">
-                    <input x-model="m.img" type="text" placeholder="GÃ¶rsel URL (boÅŸ bÄ±rakÄ±labilir)" class="admin-input">
+                    <input x-model="m.caption" type="text" placeholder="Başlık" class="admin-input">
+                    <input x-model="m.detail" type="text" placeholder="Açıklama" class="admin-input">
+                    <input x-model="m.img" type="text" placeholder="Görsel URL (boş bırakılabilir)" class="admin-input">
                 </div>
             </template>
         </div>
@@ -597,14 +597,14 @@
                         <span class="text-lg" x-text="b.fi"></span>
                         <span class="text-xs" style="color:rgba(255,255,255,.3)" x-text="`Kutu ${i+1}`"></span>
                     </div>
-                    <input x-model="b.bt" type="text" placeholder="BaÅŸlÄ±k" class="admin-input">
-                    <textarea x-model="b.bc" rows="3" placeholder="Ä°Ã§erik" class="admin-input"></textarea>
+                    <input x-model="b.bt" type="text" placeholder="Başlık" class="admin-input">
+                    <textarea x-model="b.bc" rows="3" placeholder="İçerik" class="admin-input"></textarea>
                     <div class="flex items-center gap-2 mt-1">
                         <template x-if="b.audio">
                             <div class="flex items-center gap-2 flex-1">
-                                <span class="text-xs" style="color:rgba(52,211,153,.8)">Ses dosyasÄ± yÃ¼klÃ¼</span>
+                                <span class="text-xs" style="color:rgba(52,211,153,.8)">Ses dosyası yüklü</span>
                                 <button @click.stop="b.audio=null" class="text-[10px] px-2 py-0.5 rounded"
-                                    style="background:rgba(239,68,68,.1);color:rgba(248,113,113,.8)">KaldÄ±r</button>
+                                    style="background:rgba(239,68,68,.1);color:rgba(248,113,113,.8)">Kaldır</button>
                             </div>
                         </template>
                         <template x-if="!b.audio">
@@ -614,7 +614,7 @@
                                 <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"/>
                                 </svg>
-                                Ses DosyasÄ± YÃ¼kle
+                                Ses Dosyası Yükle
                                 <input type="file" accept="audio/*" class="hidden" @change="uploadBoxAudio($event, i)">
                             </label>
                         </template>
@@ -638,7 +638,7 @@
                 <textarea x-model="mektup.p3" rows="3" class="admin-input"></textarea>
             </div>
             <div>
-                <p class="text-xs mb-1" style="color:rgba(255,255,255,.3)">Paragraf 4 (kapaÃ§)</p>
+                <p class="text-xs mb-1" style="color:rgba(255,255,255,.3)">Paragraf 4 (kapaç)</p>
                 <textarea x-model="mektup.p4" rows="2" class="admin-input"></textarea>
             </div>
         </div>
@@ -651,14 +651,13 @@
                     :disabled="adminKaydediliyor"
                     onmouseover="this.style.background='rgba(251,191,36,.18)'"
                     onmouseout="this.style.background='rgba(251,191,36,.09)'">
-                <span x-show="!adminKaydediliyor">ğŸ’¾ Kaydet</span>
+                <span x-show="!adminKaydediliyor">💾 Kaydet</span>
                 <span x-show="adminKaydediliyor">Kaydediliyor...</span>
             </button>
-            <span x-show="adminTamam" style="font-size:.82rem;color:rgba(74,222,128,.85)">âœ“ Kaydedildi!</span>
+            <span x-show="adminTamam" style="font-size:.82rem;color:rgba(74,222,128,.85)">✓ Kaydedildi!</span>
         </div>
     </div>
 </div>
-
 @endif
 
 <script>
@@ -673,7 +672,7 @@ function bday(c) {
         _playingBoxAudio: null, _boxAudioEl: null,
         muzikId: '',
         mektup: {p1:'',p2:'',p3:'',p4:''},
-        pool: ['â¤ï¸','ğŸ’›','ğŸ‰','âœ¨','ğŸ˜‚','ğŸ‚','ğŸ¥³','ğŸ’«','ğŸŠ','ğŸ˜','ğŸ”¥','ğŸ’œ','ğŸŒŸ','ğŸ‘'],
+        pool: ['❤️','💛','🎉','✨','😂','🎂','🥳','💫','🎊','😍','🔥','💜','🌟','👏'],
 
         achievements: [],
         memories: [],
@@ -684,9 +683,9 @@ function bday(c) {
             this.achievements = ((content && content.achievements) || []).map(a => ({ ...a, u: false }));
             this.memories = (content && content.memories) || [];
             this.boxes = ((content && content.boxes) || []).map((b, i) => ({
-            ...b,
-            bg: ['rgba(139,92,246,.07)','rgba(251,191,36,.04)','rgba(20,184,166,.05)'][i] || 'rgba(255,255,255,.03)',
-            f: false,
+                ...b,
+                bg: ['rgba(139,92,246,.07)','rgba(251,191,36,.04)','rgba(20,184,166,.05)'][i] || 'rgba(255,255,255,.03)',
+                f: false,
             }));
         },
 
@@ -804,15 +803,15 @@ function bday(c) {
             const r = await fetch(url, options);
             const ct = r.headers.get('content-type') || '';
 
-            if (r.redirected || r.status === 401) throw new Error('GiriÅŸ yapman gerekiyor.');
+            if (r.redirected || r.status === 401) throw new Error('Giriş yapman gerekiyor.');
             if (r.status === 403) throw new Error('Yetkin yok.');
-            if (r.status === 419) throw new Error('Oturum sÃ¼resi doldu. SayfayÄ± yenileyip tekrar dene.');
-            if (!ct.includes('application/json')) throw new Error('Sunucu beklenmeyen bir yanÄ±t dÃ¶ndÃ¼rdÃ¼.');
+            if (r.status === 419) throw new Error('Oturum süresi doldu. Sayfayı yenileyip tekrar dene.');
+            if (!ct.includes('application/json')) throw new Error('Sunucu beklenmeyen bir yanıt döndürdü.');
 
             const data = await r.json();
             if (!r.ok) {
                 const validation = data.errors ? Object.values(data.errors).flat().join(' ') : '';
-                throw new Error(validation || data.message || 'Ä°stek baÅŸarÄ±sÄ±z oldu.');
+                throw new Error(validation || data.message || 'İstek başarısız oldu.');
             }
 
             return data;
@@ -848,7 +847,7 @@ function bday(c) {
                 });
                 this.boxes[boxIndex].audio = data.audio_url;
             } catch(e) {
-                this.notify(e.message || 'Ses dosyasÄ± yÃ¼klenemedi.');
+                this.notify(e.message || 'Ses dosyası yüklenemedi.');
             } finally {
                 event.target.value = '';
             }
