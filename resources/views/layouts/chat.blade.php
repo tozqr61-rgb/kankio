@@ -75,7 +75,8 @@
 </head>
 <body class="relative flex h-screen w-full overflow-hidden bg-black text-white"
       x-data="chatLayout()" x-init="init()"
-      @toggle-left-sidebar.window="toggleLeft()">
+      @toggle-left-sidebar.window="toggleLeft()"
+      @open-stay-connected.window="stayOpen=true">
 
     <!-- ── Admin Duyuru Banneri ────────────────────────────────────────── -->
     @php $ann = \App\Models\Announcement::active(); @endphp
@@ -126,6 +127,26 @@
     <main class="relative z-10 flex-1 flex flex-col min-w-0 h-full w-full bg-transparent">
         @yield('chat-content')
     </main>
+
+    <!-- Bağlantıda Kal Overlay (keeps chat/voice document alive) -->
+    <div x-show="stayOpen" x-cloak
+         class="fixed inset-0 z-[9800] bg-black"
+         x-transition.opacity>
+        <div class="absolute top-4 left-4 right-4 z-10 flex items-center justify-between pointer-events-none">
+            <button @click="stayOpen=false"
+                    class="pointer-events-auto flex items-center gap-2 rounded-full px-4 py-2 text-xs font-medium tracking-[0.16em] uppercase transition-all"
+                    style="background:rgba(9,9,11,0.78);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.72);backdrop-filter:blur(16px)">
+                <span style="font-size:1rem;line-height:1">&larr;</span>
+                Sohbete Dön
+            </button>
+        </div>
+        <template x-if="stayOpen">
+            <iframe src="{{ route('stay.connected', ['embedded' => 1]) }}"
+                    title="Bağlantıda Kal"
+                    class="h-full w-full border-0"
+                    style="background:#030303"></iframe>
+        </template>
+    </div>
 
     <!-- Profile Modal -->
     @include('partials.profile-modal')
@@ -293,6 +314,7 @@
     function chatLayout() {
         return {
             leftOpen: window.innerWidth >= 1024,
+            stayOpen: false,
             isMobile: window.innerWidth < 1024,
             currentUser: @json(auth()->user()),
             onlineUsers: [],

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Storage;
 
 class BaglantiKalController extends Controller
@@ -14,9 +15,44 @@ class BaglantiKalController extends Controller
         $this->jsonPath = storage_path('app/baglantikal.json');
     }
 
-    public function index()
+    public function index(Request $request)
     {
-        return view('pages.stay-connected', ['content' => $this->getContent()]);
+        return view('pages.stay-connected', [
+            'isAdmin' => auth()->check() && auth()->user()->isAdmin(),
+            'embedded' => $request->boolean('embedded'),
+        ]);
+    }
+
+    public function unlock(Request $request)
+    {
+        $data = $request->validate([
+            'pin' => 'required|string|size:4',
+        ]);
+
+        if (! $this->pinMatches('access_pin', $data['pin'])) {
+            return response()->json(['message' => 'Hatalı şifre.'], 422);
+        }
+
+        return response()->json([
+            'ok' => true,
+            'content' => Arr::except($this->getContent(), ['mektup']),
+        ]);
+    }
+
+    public function unlockLetter(Request $request)
+    {
+        $data = $request->validate([
+            'pin' => 'required|string|size:4',
+        ]);
+
+        if (! $this->pinMatches('letter_pin', $data['pin'])) {
+            return response()->json(['message' => 'Hatalı şifre.'], 422);
+        }
+
+        return response()->json([
+            'ok' => true,
+            'mektup' => $this->getContent()['mektup'] ?? $this->defaultContent()['mektup'],
+        ]);
     }
 
     public function save(Request $request)
@@ -45,10 +81,14 @@ class BaglantiKalController extends Controller
             'mektup.p4'           => 'string|max:200',
         ]);
 
-        file_put_contents(
+        $written = file_put_contents(
             $this->jsonPath,
             json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)
         );
+
+        if ($written === false) {
+            return response()->json(['message' => 'İçerik dosyası yazılamadı.'], 500);
+        }
 
         return response()->json(['ok' => true]);
     }
@@ -61,11 +101,21 @@ class BaglantiKalController extends Controller
 
         $file     = $request->file('audio');
         $filename = 'bk_' . time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-        $file->storeAs('baglantikal_audio', $filename, 'public');
+        $path = $file->storeAs('baglantikal_audio', $filename, 'public');
 
         return response()->json([
-            'audio_url' => '/storage/baglantikal_audio/' . $filename,
+            'audio_url' => Storage::disk('public')->url($path),
         ]);
+    }
+
+    private function pinMatches(string $key, string $pin): bool
+    {
+        $expected = (string) config("services.baglantikal.{$key}", '');
+        if ($expected === '') {
+            return false;
+        }
+
+        return hash_equals($expected, $pin);
     }
 
     private function getContent(): array

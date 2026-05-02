@@ -12,6 +12,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class ProductionHardeningTest extends TestCase
@@ -280,6 +281,7 @@ class ProductionHardeningTest extends TestCase
         $route = app('router')->getRoutes()->getByName('stay.audio');
 
         $this->assertContains('auth', $route->gatherMiddleware());
+        $this->assertContains('admin', $route->gatherMiddleware());
         $this->assertContains('throttle:10,1', $route->gatherMiddleware());
 
         $response = $this->postJson(route('stay.audio'), [
@@ -287,5 +289,71 @@ class ProductionHardeningTest extends TestCase
         ]);
 
         $this->assertNotContains($response->getStatusCode(), [200, 201]);
+    }
+
+    public function test_should_unlock_baglanti_kal_content_without_leaking_letter(): void
+    {
+        config([
+            'services.baglantikal.access_pin' => '1071',
+            'services.baglantikal.letter_pin' => '2022',
+        ]);
+
+        $this->get(route('stay.connected'))->assertOk();
+
+        $this->postJson(route('stay.unlock'), ['pin' => '0000'])
+            ->assertStatus(422);
+
+        $this->postJson(route('stay.unlock'), ['pin' => '1071'])
+            ->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonMissingPath('content.mektup')
+            ->assertJsonStructure(['content' => ['muzik_id', 'achievements', 'memories', 'boxes']]);
+
+        $this->postJson(route('stay.letter.unlock'), ['pin' => '2022'])
+            ->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonStructure(['mektup' => ['p1', 'p2', 'p3', 'p4']]);
+    }
+
+    public function test_should_allow_only_admins_to_manage_baglanti_kal_content_and_audio(): void
+    {
+        Storage::fake('public');
+
+        $user = User::factory()->create();
+        $admin = User::factory()->create(['role' => 'admin']);
+        $payload = [
+            'muzik_id' => 'dQw4w9WgXcQ',
+            'achievements' => [],
+            'memories' => [],
+            'boxes' => [],
+            'mektup' => [
+                'p1' => 'Merhaba',
+                'p2' => 'Paragraf iki',
+                'p3' => 'Paragraf üç',
+                'p4' => 'Kapanış',
+            ],
+        ];
+
+        $this->actingAs($user)
+            ->postJson(route('stay.save'), $payload)
+            ->assertForbidden();
+
+        $this->actingAs($user)
+            ->postJson(route('stay.audio'), [
+                'audio' => UploadedFile::fake()->create('voice.webm', 10, 'audio/webm'),
+            ])
+            ->assertForbidden();
+
+        $this->actingAs($admin)
+            ->postJson(route('stay.save'), $payload)
+            ->assertOk()
+            ->assertJsonPath('ok', true);
+
+        $this->actingAs($admin)
+            ->postJson(route('stay.audio'), [
+                'audio' => UploadedFile::fake()->create('voice.webm', 10, 'audio/webm'),
+            ])
+            ->assertOk()
+            ->assertJsonStructure(['audio_url']);
     }
 }

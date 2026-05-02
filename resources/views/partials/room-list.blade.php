@@ -4,7 +4,8 @@
     <div class="px-6 pb-6 flex items-center justify-between">
         <div>
             <h2 class="font-serif text-3xl font-thin tracking-tighter" style="color:rgba(255,255,255,0.9)">Kankio</h2>
-            <a href="{{ route('stay.connected') }}" target="_blank"
+            <a href="{{ route('stay.connected') }}"
+               @click.prevent="window.dispatchEvent(new CustomEvent('open-stay-connected')); isMobile && (leftOpen = false)"
                class="text-[10px] tracking-[0.2em] uppercase mt-1 block transition-all duration-300"
                style="color:rgba(255,255,255,0.35)"
                onmouseover="this.style.color='rgba(255,255,255,0.7)';this.style.letterSpacing='0.25em'"

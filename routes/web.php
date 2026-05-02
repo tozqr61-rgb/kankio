@@ -19,7 +19,9 @@ Route::get('/maintenance', fn () => view('maintenance'))->name('maintenance');
 
 // Bağlantıda Kal — doğum günü sayfası
 Route::get('/baglantikal', [BaglantiKalController::class, 'index'])->name('stay.connected');
-Route::middleware(['auth', 'throttle:10,1'])->group(function () {
+Route::post('/baglantikal/unlock', [BaglantiKalController::class, 'unlock'])->middleware('throttle:10,1')->name('stay.unlock');
+Route::post('/baglantikal/mektup/unlock', [BaglantiKalController::class, 'unlockLetter'])->middleware('throttle:10,1')->name('stay.letter.unlock');
+Route::middleware(['auth', 'admin', 'throttle:10,1'])->group(function () {
     Route::post('/baglantikal/kaydet', [BaglantiKalController::class, 'save'])->name('stay.save');
     Route::post('/baglantikal/audio', [BaglantiKalController::class, 'uploadAudio'])->name('stay.audio');
 });

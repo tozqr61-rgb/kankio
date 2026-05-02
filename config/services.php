@@ -45,4 +45,9 @@ return [
         'secret' => env('LIVEKIT_API_SECRET', ''),
     ],
 
+    'baglantikal' => [
+        'access_pin' => env('BAGLANTIKAL_ACCESS_PIN'),
+        'letter_pin' => env('BAGLANTIKAL_LETTER_PIN'),
+    ],
+
 ];
