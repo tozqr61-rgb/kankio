@@ -704,7 +704,7 @@ function bday(c) {
             if (el) { el.classList.add('gold-pulse'); setTimeout(() => el.classList.remove('gold-pulse'), 700); }
             if (typeof confetti !== 'undefined') {
                 confetti({ particleCount:80, spread:65, origin:{y:.65},
-                           colors:['#fbbf24','#f59e0b','#fff','#a78bfa'] });
+                           colors:['#fbbf24','#f59e0b','#ef4444','#b91c1c'] });
             }
         },
 
@@ -726,7 +726,7 @@ function bday(c) {
         boom() {
             if (typeof confetti === 'undefined') return;
             const end = Date.now() + 3000;
-            const cols = ['#fbbf24','#f59e0b','#a78bfa','#fff','#34d399'];
+            const cols = ['#fbbf24','#f59e0b','#ef4444','#b91c1c'];
             (function f() {
                 confetti({ particleCount:3, angle:60,  spread:55, origin:{x:0}, colors:cols });
                 confetti({ particleCount:3, angle:120, spread:55, origin:{x:1}, colors:cols });
@@ -746,6 +746,7 @@ function bday(c) {
                 this.applyContent(data.content || {});
                 this.locked = false;
                 this.accessPin = '';
+                this.$nextTick(() => this.boom());
             } catch (e) {
                 this.accessErr = true;
                 this.shakePin('accessPinBox', () => {

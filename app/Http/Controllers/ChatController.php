@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Events\MessagesRead;
+use App\Events\StayConnectedSurpriseTriggered;
 use App\Events\UserTyping;
 use App\Models\Message;
 use App\Models\Room;
@@ -402,6 +403,38 @@ class ChatController extends Controller
                 'error' => $e->getMessage(),
             ]);
             AppMetrics::increment('external_service_errors_total', ['service' => 'reverb', 'reason' => 'typing_broadcast']);
+        }
+
+        return response()->json(['ok' => true]);
+    }
+
+    public function triggerStayConnected(Request $request, $roomId)
+    {
+        $user = Auth::user();
+        $room = Room::findOrFail($roomId);
+
+        if (! $this->canAccessRoom($room, $user)) {
+            return response()->json(['error' => 'Erişim reddedildi'], 403);
+        }
+
+        if (! $user->isAdmin()) {
+            return response()->json(['error' => 'Yetkin yok'], 403);
+        }
+
+        try {
+            broadcast(new StayConnectedSurpriseTriggered((int) $roomId, [
+                'id' => $user->id,
+                'username' => $user->username,
+            ]))->toOthers();
+        } catch (\Throwable $e) {
+            Log::warning('chat.broadcast.stay_connected_failed', [
+                'room_id' => (int) $roomId,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+            AppMetrics::increment('external_service_errors_total', ['service' => 'reverb', 'reason' => 'stay_connected_broadcast']);
+
+            return response()->json(['error' => 'Sürpriz yayını gönderilemedi'], 503);
         }
 
         return response()->json(['ok' => true]);

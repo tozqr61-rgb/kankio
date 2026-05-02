@@ -1729,6 +1729,11 @@ function chatRoom() {
                 })
                 .listen('.messages.read', ({ reader_id, message_ids }) => {
                     this._applyReadReceipt(reader_id, message_ids);
+                })
+                .listen('.stay.connected', ({ triggered_by }) => {
+                    window.dispatchEvent(new CustomEvent('open-stay-connected'));
+                    const name = triggered_by?.username || 'Yönetici';
+                    showToast(`${name} sürprizi başlattı`, 'success');
                 });
 
             /* Music state push */

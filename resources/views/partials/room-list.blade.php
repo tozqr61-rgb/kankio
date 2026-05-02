@@ -1,15 +1,23 @@
-<div class="flex flex-col h-full w-full pt-6 pb-6" x-data="roomListComp()" x-init="init()">
+﻿<div class="flex flex-col h-full w-full pt-6 pb-6" x-data="roomListComp()" x-init="init()">
 
     <!-- Header -->
     <div class="px-6 pb-6 flex items-center justify-between">
         <div>
             <h2 class="font-serif text-3xl font-thin tracking-tighter" style="color:rgba(255,255,255,0.9)">Kankio</h2>
-            <a href="{{ route('stay.connected') }}"
-               @click.prevent="window.dispatchEvent(new CustomEvent('open-stay-connected')); isMobile && (leftOpen = false)"
-               class="text-[10px] tracking-[0.2em] uppercase mt-1 block transition-all duration-300"
-               style="color:rgba(255,255,255,0.35)"
-               onmouseover="this.style.color='rgba(255,255,255,0.7)';this.style.letterSpacing='0.25em'"
-               onmouseout="this.style.color='rgba(255,255,255,0.35)';this.style.letterSpacing='0.2em'">Bağlantıda Kal</a>
+            <div class="mt-1 flex items-center gap-2">
+                <a href="{{ route('stay.connected') }}"
+                   @click.prevent="window.dispatchEvent(new CustomEvent('open-stay-connected')); isMobile && (leftOpen = false)"
+                   class="text-[10px] tracking-[0.2em] uppercase block transition-all duration-300"
+                   style="color:rgba(255,255,255,0.35)"
+                   onmouseover="this.style.color='rgba(255,255,255,0.7)';this.style.letterSpacing='0.25em'"
+                   onmouseout="this.style.color='rgba(255,255,255,0.35)';this.style.letterSpacing='0.2em'">Bağlantıda Kal</a>
+                @if(auth()->user()->isAdmin())
+                <button @click="triggerStayConnected()"
+                        class="h-5 px-2 rounded-full text-[9px] uppercase tracking-[0.16em] transition-all"
+                        style="color:rgba(251,191,36,0.8);background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.18)"
+                        title="Bu odadaki herkeste aç">Herkeste Aç</button>
+                @endif
+            </div>
         </div>
         <div class="flex items-center gap-1">
             @if(auth()->user()->isAdmin())
@@ -244,6 +252,26 @@ function roomListComp() {
                     }
                 }
             } catch(e) {}
+        },
+
+        async triggerStayConnected() {
+            const roomId = Alpine.store('chat')?.activeRoomId;
+            if (!roomId) return;
+            try {
+                const r = await fetch(`/api/chat/${roomId}/stay-connected`, {
+                    method: 'POST',
+                    headers: { 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) {
+                    showToast(data.error || 'Sürpriz gönderilemedi', 'error');
+                    return;
+                }
+                window.dispatchEvent(new CustomEvent('open-stay-connected'));
+                showToast('Sürpriz bu odadaki herkese gönderildi', 'success');
+            } catch(e) {
+                showToast('Sürpriz gönderilemedi', 'error');
+            }
         },
 
         _initRealtimeUnread() {
