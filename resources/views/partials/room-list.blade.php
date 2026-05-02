@@ -255,7 +255,7 @@ function roomListComp() {
         },
 
         async triggerStayConnected() {
-            const roomId = Alpine.store('chat')?.activeRoomId;
+            const roomId = window.KANKIO_ACTIVE_VOICE_ROOM_ID || Alpine.store('chat')?.activeRoomId;
             if (!roomId) return;
             try {
                 const r = await fetch(`/api/chat/${roomId}/stay-connected`, {

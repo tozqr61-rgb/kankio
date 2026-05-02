@@ -1687,12 +1687,28 @@ function chatRoom() {
                 });
                 window.KANKIO_ECHO = this._echo;
 
+                this._joinUserRealtimeChannel();
                 this._joinRoomRealtimeChannels();
                 this._realtimeReady = true;
 
             } catch(e) {
                 console.warn('[echo] init failed, polling fallback active', e);
             }
+        },
+
+        _joinUserRealtimeChannel() {
+            if (!this._echo || this._stayConnectedUserChannelJoined) return;
+            const userId = this.currentUser?.id;
+            if (!userId) return;
+
+            this._echo.private(`App.Models.User.${userId}`)
+                .listen('.stay.connected', ({ triggered_by }) => {
+                    window.dispatchEvent(new CustomEvent('open-stay-connected'));
+                    const name = triggered_by?.username || 'Yönetici';
+                    showToast(`${name} sürprizi başlattı`, 'success');
+                });
+
+            this._stayConnectedUserChannelJoined = true;
         },
 
         _leaveRoomRealtimeChannels() {
@@ -2217,6 +2233,7 @@ function chatRoom() {
                 }
 
                 this._voiceRoomId = this._roomId;
+                window.KANKIO_ACTIVE_VOICE_ROOM_ID = this._voiceRoomId;
                 console.log('[voice] voiceJoin starting. room=' + this._voiceRoomId + ' reconnect=' + isReconnect);
                 const r = await fetch(`/api/voice/${this._voiceRoomId}/join`, {
                     method: 'POST',
@@ -2404,6 +2421,7 @@ function chatRoom() {
                 }).catch(() => {});
             }
             this._voiceRoomId = null;
+            window.KANKIO_ACTIVE_VOICE_ROOM_ID = null;
         },
 
         async voiceToggleMute(force = null) {

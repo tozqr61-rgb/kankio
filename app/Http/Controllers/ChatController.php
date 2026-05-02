@@ -421,11 +421,24 @@ class ChatController extends Controller
             return response()->json(['error' => 'Yetkin yok'], 403);
         }
 
+        $triggeredBy = [
+            'id' => $user->id,
+            'username' => $user->username,
+        ];
+
+        $voiceUserIds = \DB::table('voice_sessions')
+            ->where('room_id', (int) $roomId)
+            ->where('is_active', true)
+            ->where('user_id', '!=', $user->id)
+            ->pluck('user_id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
         try {
-            broadcast(new StayConnectedSurpriseTriggered((int) $roomId, [
-                'id' => $user->id,
-                'username' => $user->username,
-            ]))->toOthers();
+            foreach ($voiceUserIds as $voiceUserId) {
+                broadcast(new StayConnectedSurpriseTriggered((int) $roomId, $triggeredBy, $voiceUserId));
+            }
         } catch (\Throwable $e) {
             Log::warning('chat.broadcast.stay_connected_failed', [
                 'room_id' => (int) $roomId,
@@ -437,7 +450,7 @@ class ChatController extends Controller
             return response()->json(['error' => 'Sürpriz yayını gönderilemedi'], 503);
         }
 
-        return response()->json(['ok' => true]);
+        return response()->json(['ok' => true, 'sent_to' => $voiceUserIds->count()]);
     }
 
     public function getPresence()

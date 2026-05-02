@@ -15,11 +15,12 @@ class StayConnectedSurpriseTriggered implements ShouldBroadcastNow
     public function __construct(
         public readonly int $roomId,
         public readonly array $triggeredBy,
+        public readonly int $userId,
     ) {}
 
     public function broadcastOn(): array
     {
-        return [new PrivateChannel("room.{$this->roomId}.chat")];
+        return [new PrivateChannel("App.Models.User.{$this->userId}")];
     }
 
     public function broadcastAs(): string
@@ -30,6 +31,7 @@ class StayConnectedSurpriseTriggered implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         return [
+            'room_id' => $this->roomId,
             'triggered_by' => $this->triggeredBy,
         ];
     }
