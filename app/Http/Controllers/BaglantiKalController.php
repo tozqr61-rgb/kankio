@@ -20,6 +20,7 @@ class BaglantiKalController extends Controller
         return view('pages.stay-connected', [
             'isAdmin' => auth()->check() && auth()->user()->isAdmin(),
             'embedded' => $request->boolean('embedded'),
+            'initialContent' => Arr::except($this->getContent(), ['mektup']),
         ]);
     }
 

@@ -135,7 +135,7 @@
         .admin-input::placeholder { color:rgba(255,255,255,.18); }
     </style>
 </head>
-<body x-data="bday({ isAdmin: @json($isAdmin ?? false) })" x-init="init()" @click="rx($event)">
+<body x-data="bday({ isAdmin: @json($isAdmin ?? false), initialContent: @json($initialContent ?? []) })" x-init="init()" @click="rx($event)">
 
 <!-- ── Erisim kilidi ── -->
 <div x-show="locked"
@@ -663,12 +663,13 @@
 <script>
 function bday(c) {
     return {
-        locked: true, accessPin: '', accessErr: false, accessLoading: false,
+        locked: false, accessPin: '', accessErr: false, accessLoading: false,
         reactions: [], rid: 0,
         modal: false, cur: null,
         letterOpen: false, letterStage: 0, pin: '', letterErr: false, letterLoading: false,
         adminOpen: false, adminSekme: 'muzik', adminKaydediliyor: false, adminTamam: false, adminError: '',
         isAdmin: !!(c && c.isAdmin),
+        initialContent: (c && c.initialContent) || {},
         _playingBoxAudio: null, _boxAudioEl: null,
         muzikId: '',
         mektup: {p1:'',p2:'',p3:'',p4:''},
@@ -878,7 +879,9 @@ function bday(c) {
         },
 
         init() {
-            this.$nextTick(() => this.$refs.accessPinIn?.focus());
+            this.applyContent(this.initialContent);
+            this.locked = false;
+            this.$nextTick(() => this.boom());
             const sf = document.getElementById('starfield');
             if (!sf) return;
             for (let i = 0; i < 90; i++) {
