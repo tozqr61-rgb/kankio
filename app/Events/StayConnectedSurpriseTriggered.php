@@ -16,6 +16,7 @@ class StayConnectedSurpriseTriggered implements ShouldBroadcastNow
         public readonly int $roomId,
         public readonly array $triggeredBy,
         public readonly int $userId,
+        public readonly string $triggerId,
     ) {}
 
     public function broadcastOn(): array
@@ -31,6 +32,7 @@ class StayConnectedSurpriseTriggered implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         return [
+            'id' => $this->triggerId,
             'room_id' => $this->roomId,
             'triggered_by' => $this->triggeredBy,
         ];

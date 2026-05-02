@@ -49,6 +49,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/api/chat/{roomId}/typing', [ChatController::class, 'typing'])->name('api.message.typing');
     Route::get('/api/chat/{roomId}/archived', [ChatController::class, 'archivedMessages'])->name('api.message.archived');
     Route::post('/api/chat/{roomId}/stay-connected', [ChatController::class, 'triggerStayConnected'])->name('api.stay.trigger');
+    Route::get('/api/stay-connected/pending', [ChatController::class, 'pendingStayConnected'])->name('api.stay.pending');
 
     // Rooms API
     Route::post('/api/rooms', [RoomController::class, 'store'])->name('api.room.store');

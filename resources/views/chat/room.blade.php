@@ -1061,6 +1061,8 @@ function chatRoom() {
 
         /* Poll state - adaptive */
         _pollTimer: null,
+        _stayConnectedPollTimer: null,
+        _lastStayConnectedTriggerId: null,
         _idleCount: 0,
         _hidden: false,
         _realtimeReady: false,
@@ -1197,10 +1199,42 @@ function chatRoom() {
             this._initBackgroundHandlers();
             this._initTauri();
             this._startSeenTracking();
+            this._startStayConnectedFallback();
             this._initPushToTalk();
         },
 
         /* ── Room Transition ── */
+        _openStayConnectedSurprise(triggeredBy = null) {
+            window.dispatchEvent(new CustomEvent('open-stay-connected'));
+            const name = triggeredBy?.username || 'Admin';
+            showToast(`${name} surprizi baslatti`, 'success');
+        },
+
+        _handleStayConnectedTrigger(trigger = {}) {
+            if (trigger.id && trigger.id === this._lastStayConnectedTriggerId) return;
+            this._lastStayConnectedTriggerId = trigger.id || String(Date.now());
+            this._openStayConnectedSurprise(trigger.triggered_by);
+        },
+
+        _startStayConnectedFallback() {
+            clearInterval(this._stayConnectedPollTimer);
+            const check = async () => {
+                if (document.hidden) return;
+                try {
+                    const r = await fetch('/api/stay-connected/pending', {
+                        headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    });
+                    if (!r.ok) return;
+                    const data = await r.json();
+                    if (!data.pending || !data.trigger) return;
+                    this._handleStayConnectedTrigger(data.trigger);
+                } catch (e) {}
+            };
+
+            check();
+            this._stayConnectedPollTimer = setInterval(check, 2500);
+        },
+
         async changeRoom(id, name, options = {}) {
             id = String(id);
             const pushState = options.pushState !== false;
@@ -1702,10 +1736,8 @@ function chatRoom() {
             if (!userId) return;
 
             this._echo.private(`App.Models.User.${userId}`)
-                .listen('.stay.connected', ({ triggered_by }) => {
-                    window.dispatchEvent(new CustomEvent('open-stay-connected'));
-                    const name = triggered_by?.username || 'Yönetici';
-                    showToast(`${name} sürprizi başlattı`, 'success');
+                .listen('.stay.connected', ({ id, triggered_by }) => {
+                    this._handleStayConnectedTrigger({ id, triggered_by });
                 });
 
             this._stayConnectedUserChannelJoined = true;
@@ -1746,10 +1778,8 @@ function chatRoom() {
                 .listen('.messages.read', ({ reader_id, message_ids }) => {
                     this._applyReadReceipt(reader_id, message_ids);
                 })
-                .listen('.stay.connected', ({ triggered_by }) => {
-                    window.dispatchEvent(new CustomEvent('open-stay-connected'));
-                    const name = triggered_by?.username || 'Yönetici';
-                    showToast(`${name} sürprizi başlattı`, 'success');
+                .listen('.stay.connected', ({ id, triggered_by }) => {
+                    this._handleStayConnectedTrigger({ id, triggered_by });
                 });
 
             /* Music state push */

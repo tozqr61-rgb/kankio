@@ -436,8 +436,16 @@ class ChatController extends Controller
             ->values();
 
         try {
+            $payload = [
+                'id' => (string) \Illuminate\Support\Str::uuid(),
+                'room_id' => (int) $roomId,
+                'triggered_by' => $triggeredBy,
+                'triggered_at' => now()->timestamp,
+            ];
+
             foreach ($voiceUserIds as $voiceUserId) {
-                broadcast(new StayConnectedSurpriseTriggered((int) $roomId, $triggeredBy, $voiceUserId));
+                \Cache::put("stay_connected_surprise_{$voiceUserId}", $payload, now()->addMinutes(2));
+                broadcast(new StayConnectedSurpriseTriggered((int) $roomId, $triggeredBy, $voiceUserId, $payload['id']));
             }
         } catch (\Throwable $e) {
             Log::warning('chat.broadcast.stay_connected_failed', [
@@ -451,6 +459,17 @@ class ChatController extends Controller
         }
 
         return response()->json(['ok' => true, 'sent_to' => $voiceUserIds->count()]);
+    }
+
+    public function pendingStayConnected()
+    {
+        $userId = Auth::id();
+        $payload = \Cache::pull("stay_connected_surprise_{$userId}");
+
+        return response()->json([
+            'pending' => (bool) $payload,
+            'trigger' => $payload,
+        ]);
     }
 
     public function getPresence()
