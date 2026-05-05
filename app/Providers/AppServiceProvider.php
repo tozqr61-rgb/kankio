@@ -2,6 +2,15 @@
 
 namespace App\Providers;
 
+use App\Events\MessageSent;
+use App\Listeners\Bots\DispatchBotMessage;
+use App\Services\Bots\BotCommandParser;
+use App\Services\Bots\BotManager;
+use App\Services\Bots\BotMessageService;
+use App\Services\Bots\Bots\DjBot;
+use App\Services\Bots\Bots\GameBot;
+use App\Services\Games\IsimSehirGameService;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 
@@ -12,7 +21,13 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(BotManager::class, function ($app) {
+            $manager = new BotManager($app->make(BotCommandParser::class));
+            $manager->register($app->make(GameBot::class));
+            $manager->register($app->make(DjBot::class));
+
+            return $manager;
+        });
     }
 
     /**
@@ -20,6 +35,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Event::listen(MessageSent::class, DispatchBotMessage::class);
+
         if (! app()->environment('production')) {
             return;
         }

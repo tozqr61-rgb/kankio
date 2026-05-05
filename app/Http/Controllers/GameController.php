@@ -93,6 +93,13 @@ class GameController extends Controller
         return response()->json($this->games->state($gameSession, Auth::user()));
     }
 
+    public function history(Request $request, Room $room, GameSession $gameSession)
+    {
+        $this->authorizeGame($room, $gameSession);
+
+        return response()->json($this->games->history($gameSession, Auth::user(), (int) $request->query('page', 1)));
+    }
+
     public function join(Room $room, GameSession $gameSession)
     {
         $this->authorizeGame($room, $gameSession);
@@ -226,11 +233,13 @@ class GameController extends Controller
     {
         if ($user->isAdmin()) {
             return Room::where('type', '!=', 'dm')
+                ->where('is_archived', false)
                 ->orderBy('created_at', 'asc')
                 ->get();
         }
 
         return Room::where('type', '!=', 'dm')
+            ->where('is_archived', false)
             ->where(function ($q) use ($user) {
                 $q->where('type', 'global')
                     ->orWhere('type', 'announcements')
@@ -245,6 +254,15 @@ class GameController extends Controller
 
     private function getOnlineUsers(): array
     {
-        return Cache::get('online_users', []);
+        $ids = array_values(array_unique(array_map('intval', Cache::get('presence:user_ids', []))));
+        $users = [];
+        foreach ($ids as $id) {
+            $entry = Cache::get("presence:user:{$id}");
+            if (is_array($entry)) {
+                $users[] = $entry;
+            }
+        }
+
+        return $users;
     }
 }

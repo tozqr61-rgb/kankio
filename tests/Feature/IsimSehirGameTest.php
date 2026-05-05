@@ -377,4 +377,83 @@ class IsimSehirGameTest extends TestCase
         $this->assertDatabaseHas('game_sessions', ['id' => $session->id, 'status' => 'cancelled']);
         $this->assertDatabaseHas('game_rounds', ['id' => $round->id, 'status' => 'closed']);
     }
+
+    public function test_game_history_endpoint_returns_paginated_round_details(): void
+    {
+        $creator = User::factory()->create();
+        $room = Room::create(['name' => 'Global', 'type' => 'global', 'created_by' => $creator->id]);
+        $session = GameSession::create([
+            'room_id' => $room->id,
+            'created_by' => $creator->id,
+            'game_type' => 'isim_sehir',
+            'status' => 'waiting',
+            'current_round_no' => 2,
+            'round_time_seconds' => 420,
+            'settings' => ['categories' => ['isim'], 'round_time_seconds' => 420],
+        ]);
+        GameParticipant::create(['game_session_id' => $session->id, 'user_id' => $creator->id, 'joined_at' => now(), 'is_active' => true]);
+
+        $round = GameRound::create([
+            'game_session_id' => $session->id,
+            'round_no' => 1,
+            'letter' => 'M',
+            'status' => 'closed',
+            'started_at' => now()->subMinutes(10),
+            'submission_deadline' => now()->subMinutes(3),
+            'ended_at' => now()->subMinutes(2),
+            'results_published_at' => now()->subMinutes(2),
+        ]);
+        GameSubmission::create([
+            'game_round_id' => $round->id,
+            'user_id' => $creator->id,
+            'answers' => ['isim' => 'Mert'],
+            'submitted_at' => now()->subMinutes(4),
+            'is_locked' => true,
+            'score_total' => 10,
+            'score_breakdown' => ['isim' => ['score' => 10]],
+        ]);
+
+        $this->actingAs($creator)
+            ->getJson(route('rooms.games.history', [$room, $session]))
+            ->assertOk()
+            ->assertJsonPath('rounds.0.id', $round->id)
+            ->assertJsonPath('rounds.0.submissions.0.answers.isim', 'Mert')
+            ->assertJsonPath('pagination.has_more', false);
+    }
+
+    public function test_city_category_uses_city_allowlist(): void
+    {
+        $creator = User::factory()->create();
+        $player = User::factory()->create();
+        $room = Room::create(['name' => 'Global', 'type' => 'global', 'created_by' => $creator->id]);
+        $session = GameSession::create([
+            'room_id' => $room->id,
+            'created_by' => $creator->id,
+            'game_type' => 'isim_sehir',
+            'status' => 'in_progress',
+            'current_round_no' => 1,
+            'round_time_seconds' => 420,
+            'settings' => ['categories' => ['şehir'], 'round_time_seconds' => 420],
+        ]);
+        GameParticipant::create(['game_session_id' => $session->id, 'user_id' => $creator->id, 'joined_at' => now(), 'is_active' => true]);
+        GameParticipant::create(['game_session_id' => $session->id, 'user_id' => $player->id, 'joined_at' => now(), 'is_active' => true]);
+        $round = GameRound::create([
+            'game_session_id' => $session->id,
+            'round_no' => 1,
+            'letter' => 'M',
+            'status' => 'collecting',
+            'started_at' => now(),
+            'submission_deadline' => now()->addMinutes(7),
+        ]);
+
+        $this->actingAs($creator)
+            ->postJson(route('rooms.games.rounds.submit', [$room, $session, $round]), ['answers' => ['şehir' => 'Mersin']])
+            ->assertOk();
+        $this->actingAs($player)
+            ->postJson(route('rooms.games.rounds.submit', [$room, $session, $round]), ['answers' => ['şehir' => 'Masa']])
+            ->assertOk();
+
+        $this->assertEquals(10, GameParticipant::where('game_session_id', $session->id)->where('user_id', $creator->id)->value('total_score'));
+        $this->assertEquals(0, GameParticipant::where('game_session_id', $session->id)->where('user_id', $player->id)->value('total_score'));
+    }
 }

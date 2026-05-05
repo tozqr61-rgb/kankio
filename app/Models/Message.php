@@ -3,9 +3,12 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Message extends Model
 {
+    use SoftDeletes;
+
     protected $fillable = [
         'room_id',
         'sender_id',
@@ -16,6 +19,7 @@ class Message extends Model
         'reply_to',
         'is_edited',
         'is_system_message',
+        'deleted_by',
     ];
 
     protected function casts(): array
@@ -45,5 +49,10 @@ class Message extends Model
     {
         return $this->belongsToMany(User::class, 'message_reads')
             ->withPivot('read_at');
+    }
+
+    public function deletedBy()
+    {
+        return $this->belongsTo(User::class, 'deleted_by');
     }
 }

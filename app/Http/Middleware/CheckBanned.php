@@ -11,9 +11,9 @@ class CheckBanned
 {
     public function handle(Request $request, Closure $next): Response
     {
-        if (Auth::check() && Auth::user()->is_banned) {
+        if (Auth::check() && (Auth::user()->is_banned || Auth::user()->isDeactivated())) {
             Auth::logout();
-            return redirect()->route('login')->withErrors(['username' => 'Hesabınız yasaklanmıştır.']);
+            return redirect()->route('login')->withErrors(['username' => 'Bu hesap artık aktif değil.']);
         }
 
         return $next($request);

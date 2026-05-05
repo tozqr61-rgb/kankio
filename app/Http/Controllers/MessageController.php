@@ -107,6 +107,7 @@ class MessageController extends Controller
             return response()->json(['error' => 'Erişim reddedildi'], 403);
         }
 
+        $message->forceFill(['deleted_by' => $user->id])->save();
         $message->delete();
 
         try {

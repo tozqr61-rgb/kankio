@@ -347,6 +347,13 @@ class IsimSehirGameService
         return $this->stateService->state($session->fresh(), $viewer);
     }
 
+    public function history(GameSession $session, User $viewer, int $page = 1): array
+    {
+        $this->closeExpiredRound($session, $viewer);
+
+        return $this->stateService->history($session->fresh(), $viewer, $page);
+    }
+
     public function broadcast(GameSession $session, User $viewer, string $type): void
     {
         try {

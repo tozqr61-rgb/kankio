@@ -36,6 +36,13 @@
         </div>
 
         {{-- Music speaker toggle (mobile) --}}
+        <button x-show="showMusicUnlockPrompt && musicState.video_id && musicState.is_playing"
+                @click="unlockMusicPlayback()"
+                class="h-9 px-3 rounded-xl flex items-center gap-1 text-xs font-semibold shrink-0"
+                style="background:rgba(16,185,129,0.18);color:rgba(110,231,183,1);border:1px solid rgba(16,185,129,0.25)">
+            Müziği Aç
+        </button>
+
         <button x-show="musicState.video_id && musicState.is_playing" @click="muteToggle()"
                 class="h-9 w-9 rounded-xl flex items-center justify-center shrink-0 transition-all"
                 :style="_playerMuted

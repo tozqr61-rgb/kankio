@@ -82,16 +82,17 @@ Route::middleware('auth')->group(function () {
     Route::post('/api/voice/{roomId}/speaking', [VoiceController::class, 'speaking'])->middleware('throttle:180,1')->name('api.voice.speaking');
     Route::post('/api/voice/{roomId}/quality', [VoiceController::class, 'quality'])->middleware('throttle:60,1')->name('api.voice.quality');
     Route::get('/api/voice/{roomId}/state', [VoiceController::class, 'state'])->name('api.voice.state');
-    Route::post('/api/voice/{roomId}/mute-all', [VoiceController::class, 'muteAll'])->name('api.voice.mute_all');
-    Route::delete('/api/voice/{roomId}/participants/{userId}', [VoiceController::class, 'kick'])->name('api.voice.kick');
-    Route::post('/api/voice/{roomId}/participants/{userId}/speak', [VoiceController::class, 'setSpeakPermission'])->name('api.voice.speak_permission');
-    Route::post('/api/voice/{roomId}/settings', [VoiceController::class, 'settings'])->name('api.voice.settings');
+    Route::post('/api/voice/{roomId}/mute-all', [VoiceController::class, 'muteAll'])->middleware('throttle:30,1')->name('api.voice.mute_all');
+    Route::delete('/api/voice/{roomId}/participants/{userId}', [VoiceController::class, 'kick'])->middleware('throttle:30,1')->name('api.voice.kick');
+    Route::post('/api/voice/{roomId}/participants/{userId}/speak', [VoiceController::class, 'setSpeakPermission'])->middleware('throttle:30,1')->name('api.voice.speak_permission');
+    Route::post('/api/voice/{roomId}/settings', [VoiceController::class, 'settings'])->middleware('throttle:30,1')->name('api.voice.settings');
 
     Route::prefix('rooms/{room}')->name('rooms.')->group(function () {
         Route::get('/games/current', [GameController::class, 'current'])->name('games.current');
         Route::post('/games/start', [GameController::class, 'start'])->middleware('throttle:30,1')->name('games.start');
         Route::get('/games/{gameSession}', [GameController::class, 'show'])->name('games.show');
         Route::get('/games/{gameSession}/state', [GameController::class, 'state'])->name('games.state');
+        Route::get('/games/{gameSession}/history', [GameController::class, 'history'])->name('games.history');
         Route::post('/games/{gameSession}/join', [GameController::class, 'join'])->middleware('throttle:30,1')->name('games.join');
         Route::post('/games/{gameSession}/leave', [GameController::class, 'leave'])->middleware('throttle:30,1')->name('games.leave');
         Route::post('/games/{gameSession}/ready', [GameController::class, 'ready'])->middleware('throttle:60,1')->name('games.ready');
@@ -103,12 +104,18 @@ Route::middleware('auth')->group(function () {
         Route::post('/games/{gameSession}/finish', [GameController::class, 'finish'])->middleware('throttle:30,1')->name('games.finish');
     });
 
+    Route::middleware('oversight')->group(function () {
+        Route::get('/admin/oversight', [AdminController::class, 'oversight'])->name('admin.oversight');
+        Route::post('/admin/oversight/access', [AdminController::class, 'startOversightAccess'])->middleware('throttle:20,1')->name('admin.oversight.access');
+    });
+
     // Admin
     Route::middleware('admin')->prefix('admin')->group(function () {
         Route::get('/', [AdminController::class, 'dashboard'])->name('admin.dashboard');
         Route::get('/users', [AdminController::class, 'users'])->name('admin.users');
         Route::get('/rooms', [AdminController::class, 'rooms'])->name('admin.rooms');
         Route::get('/invites', [AdminController::class, 'invites'])->name('admin.invites');
+        Route::get('/actions', [AdminController::class, 'actions'])->name('admin.actions');
         Route::get('/metrics', [AdminController::class, 'metrics'])->name('admin.metrics');
 
         Route::post('/users/{userId}/ban', [AdminController::class, 'banUser'])->name('admin.ban');

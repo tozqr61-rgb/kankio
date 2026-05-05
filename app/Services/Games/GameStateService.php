@@ -2,6 +2,7 @@
 
 namespace App\Services\Games;
 
+use App\Models\GameRound;
 use App\Models\GameSession;
 use App\Models\User;
 
@@ -13,14 +14,26 @@ class GameStateService
             'room',
             'creator',
             'participants.user',
-            'rounds' => fn ($q) => $q->orderBy('round_no'),
-            'rounds.submissions.user',
         ]);
 
-        $currentRound = $session->rounds->firstWhere('round_no', $session->current_round_no);
+        $currentRound = GameRound::with('submissions.user')
+            ->where('game_session_id', $session->id)
+            ->where('round_no', $session->current_round_no)
+            ->first();
         $mySubmission = $currentRound
             ? $currentRound->submissions->firstWhere('user_id', $viewer->id)
             : null;
+        $historyRounds = GameRound::where('game_session_id', $session->id)
+            ->when($currentRound, fn ($q) => $q->whereKeyNot($currentRound->id))
+            ->withCount([
+                'submissions',
+                'submissions as locked_submissions_count' => fn ($q) => $q->where('is_locked', true),
+            ])
+            ->orderByDesc('round_no')
+            ->limit(10)
+            ->get()
+            ->reverse()
+            ->values();
         $categories = $session->settings['categories'] ?? IsimSehirGameService::DEFAULT_CATEGORIES;
 
         $participants = $session->participants
@@ -83,9 +96,7 @@ class GameStateService
                 'score_total' => (int) $mySubmission->score_total,
                 'score_breakdown' => $mySubmission->score_breakdown ?? [],
             ] : null,
-            'history' => $session->rounds
-                ->filter(fn ($r) => $currentRound?->id !== $r->id)
-                ->values()
+            'history' => $historyRounds
                 ->map(fn ($r) => [
                     'id' => $r->id,
                     'round_no' => $r->round_no,
@@ -93,10 +104,52 @@ class GameStateService
                     'status' => $r->status,
                     'ended_at' => $r->ended_at?->toISOString(),
                     'results_published_at' => $r->results_published_at?->toISOString(),
-                    'submissions_count' => $r->submissions->count(),
-                    'locked_submissions_count' => $r->submissions->where('is_locked', true)->count(),
+                    'submissions_count' => (int) $r->submissions_count,
+                    'locked_submissions_count' => (int) $r->locked_submissions_count,
                 ])
                 ->toArray(),
+        ];
+    }
+
+    public function history(GameSession $session, User $viewer, int $page = 1): array
+    {
+        $rounds = GameRound::where('game_session_id', $session->id)
+            ->with(['submissions.user'])
+            ->withCount([
+                'submissions',
+                'submissions as locked_submissions_count' => fn ($q) => $q->where('is_locked', true),
+            ])
+            ->orderByDesc('round_no')
+            ->paginate(10, ['*'], 'page', max(1, $page));
+
+        return [
+            'now' => now()->toISOString(),
+            'rounds' => collect($rounds->items())->map(fn ($round) => [
+                'id' => $round->id,
+                'round_no' => $round->round_no,
+                'letter' => $round->letter,
+                'status' => $round->status,
+                'started_at' => $round->started_at?->toISOString(),
+                'submission_deadline' => $round->submission_deadline?->toISOString(),
+                'ended_at' => $round->ended_at?->toISOString(),
+                'results_published_at' => $round->results_published_at?->toISOString(),
+                'submissions_count' => (int) $round->submissions_count,
+                'locked_submissions_count' => (int) $round->locked_submissions_count,
+                'submissions' => $round->submissions->map(fn ($submission) => [
+                    'user_id' => $submission->user_id,
+                    'username' => $submission->user?->username,
+                    'answers' => $round->status === 'collecting' && $submission->user_id !== $viewer->id ? [] : ($submission->answers ?? []),
+                    'submitted_at' => $submission->submitted_at?->toISOString(),
+                    'is_locked' => (bool) $submission->is_locked,
+                    'score_total' => (int) $submission->score_total,
+                    'score_breakdown' => $round->status === 'collecting' ? [] : ($submission->score_breakdown ?? []),
+                ])->values()->toArray(),
+            ])->values()->toArray(),
+            'pagination' => [
+                'current_page' => $rounds->currentPage(),
+                'has_more' => $rounds->hasMorePages(),
+                'total' => $rounds->total(),
+            ],
         ];
     }
 }

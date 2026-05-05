@@ -2,9 +2,12 @@
 
 namespace Database\Seeders;
 
+use App\Models\Bot;
 use App\Models\InviteCode;
 use App\Models\Room;
 use App\Models\User;
+use App\Services\Bots\Bots\DjBot;
+use App\Services\Bots\Bots\GameBot;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -46,6 +49,8 @@ class DatabaseSeeder extends Seeder
             $ann->members()->syncWithoutDetaching([$admin->id => ['role' => 'owner']]);
         }
 
+        $this->seedBots();
+
         if (app()->environment(['local', 'testing'])) {
             for ($i = 0; $i < 3; $i++) {
                 do {
@@ -57,6 +62,40 @@ class DatabaseSeeder extends Seeder
                     'expires_at' => now()->addYear(),
                 ]);
             }
+        }
+    }
+
+    private function seedBots(): void
+    {
+        $definitions = [
+            [
+                'bot_key'      => GameBot::BOT_KEY,
+                'display_name' => '🎮 Oyun Botu',
+                'username'     => 'oyun_botu',
+                'email'        => 'bot+game@kankio.internal',
+            ],
+            [
+                'bot_key'      => DjBot::BOT_KEY,
+                'display_name' => '🎵 DJ Bot',
+                'username'     => 'dj_bot',
+                'email'        => 'bot+dj@kankio.internal',
+            ],
+        ];
+
+        foreach ($definitions as $def) {
+            $user = User::firstOrCreate(['email' => $def['email']], [
+                'username'     => $def['username'],
+                'password'     => Hash::make(Str::random(40)),
+                'role'         => 'user',
+                'is_bot'       => true,
+                'presence_mode'=> 'invisible',
+            ]);
+
+            Bot::firstOrCreate(['bot_key' => $def['bot_key']], [
+                'user_id'      => $user->id,
+                'display_name' => $def['display_name'],
+                'is_active'    => true,
+            ]);
         }
     }
 }

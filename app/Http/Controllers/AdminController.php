@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\MessageSent;
+use App\Models\AdminAction;
 use App\Models\Announcement;
 use App\Models\AppRelease;
 use App\Models\InviteCode;
@@ -24,7 +26,7 @@ class AdminController extends Controller
     {
         $userCount = User::count();
         $msgCount = Message::count();
-        $roomCount = Room::count();
+        $roomCount = Room::where('is_archived', false)->count();
         $metrics = AppMetrics::snapshot();
 
         return view('admin.dashboard', compact('userCount', 'msgCount', 'roomCount', 'metrics'));
@@ -56,6 +58,18 @@ class AdminController extends Controller
         return view('admin.invites', compact('codes'));
     }
 
+    public function actions(Request $request)
+    {
+        $actions = AdminAction::with('actor')
+            ->when($request->filled('action'), fn ($q) => $q->where('action', 'like', '%'.$request->string('action').'%'))
+            ->when($request->filled('actor'), fn ($q) => $q->whereHas('actor', fn ($actor) => $actor->where('username', 'like', '%'.$request->string('actor').'%')))
+            ->latest()
+            ->paginate(50)
+            ->withQueryString();
+
+        return view('admin.actions', compact('actions'));
+    }
+
     // API Actions
     public function banUser(Request $request, $userId)
     {
@@ -74,7 +88,11 @@ class AdminController extends Controller
         if ($user->id === auth()->id()) {
             return response()->json(['error' => 'Kendi rolünü değiştiremezsin'], 403);
         }
-        $newRole = $user->role === 'admin' ? 'user' : 'admin';
+        $data = $request->validate([
+            'role' => 'nullable|in:user,admin,oversight_admin',
+        ]);
+
+        $newRole = $data['role'] ?? ($user->role === 'admin' ? 'user' : 'admin');
         $user->update(['role' => $newRole]);
         $this->audit->record($request, 'user.role_toggle', User::class, $user->id, [
             'role' => $newRole,
@@ -86,11 +104,23 @@ class AdminController extends Controller
     public function deleteUser(Request $request, $userId)
     {
         $user = User::findOrFail($userId);
-        $this->audit->record($request, 'user.delete', User::class, $user->id, [
+        if ($user->id === auth()->id()) {
+            return response()->json(['error' => 'Kendi hesabını devre dışı bırakamazsın'], 403);
+        }
+
+        $this->audit->record($request, 'user.deactivate_anonymize', User::class, $user->id, [
             'username' => $user->username,
             'role' => $user->role,
         ]);
-        $user->delete();
+        $user->update([
+            'username' => 'deleted_user_'.$user->id,
+            'email' => 'deleted_user_'.$user->id.'@kankio.invalid',
+            'avatar_url' => null,
+            'is_banned' => true,
+            'presence_mode' => 'invisible',
+            'deactivated_at' => now(),
+            'deactivated_by' => auth()->id(),
+        ]);
 
         return response()->json(['ok' => true]);
     }
@@ -98,11 +128,15 @@ class AdminController extends Controller
     public function deleteRoom(Request $request, $roomId)
     {
         $room = Room::findOrFail($roomId);
-        $this->audit->record($request, 'room.delete', Room::class, $room->id, [
+        $this->audit->record($request, 'room.archive', Room::class, $room->id, [
             'name' => $room->name,
             'type' => $room->type,
         ]);
-        $room->delete();
+        $room->update([
+            'is_archived' => true,
+            'archived_at' => now(),
+            'archived_by' => auth()->id(),
+        ]);
 
         return response()->json(['ok' => true]);
     }
@@ -141,25 +175,101 @@ class AdminController extends Controller
         $announcementRoomIds = Room::where('type', 'announcements')->pluck('id');
         $count = Message::where('created_at', '<', now()->subHours(24))
             ->whereNotIn('room_id', $announcementRoomIds)
-            ->delete();
+            ->update(['is_archived' => true]);
         $this->audit->record($request, 'messages.clean_old', Message::class, null, [
-            'deleted' => $count,
+            'archived' => $count,
             'older_than_hours' => 24,
         ]);
 
-        return response()->json(['deleted' => $count]);
+        return response()->json(['archived' => $count, 'deleted' => 0]);
     }
 
     public function cleanAllMessages(Request $request)
     {
         $announcementRoomIds = Room::where('type', 'announcements')->pluck('id');
         $count = Message::whereNotIn('room_id', $announcementRoomIds)->count();
-        Message::whereNotIn('room_id', $announcementRoomIds)->delete();
+        Message::whereNotIn('room_id', $announcementRoomIds)->update([
+            'deleted_by' => auth()->id(),
+            'deleted_at' => now(),
+        ]);
         $this->audit->record($request, 'messages.clean_all', Message::class, null, [
-            'deleted' => $count,
+            'soft_deleted' => $count,
         ]);
 
         return response()->json(['deleted' => $count]);
+    }
+
+    public function oversight(Request $request)
+    {
+        $this->authorizeOversight();
+
+        $rooms = Room::with('creator')
+            ->where('is_archived', false)
+            ->orderBy('created_at', 'desc')
+            ->get(['id', 'name', 'type', 'created_by', 'is_archived', 'created_at']);
+
+        $recentAccesses = \App\Models\AdminAction::with('actor')
+            ->where('action', 'oversight.room_access')
+            ->latest()
+            ->limit(30)
+            ->get();
+
+        return view('admin.oversight', compact('rooms', 'recentAccesses'));
+    }
+
+    public function startOversightAccess(Request $request)
+    {
+        $this->authorizeOversight();
+
+        $data = $request->validate([
+            'room_id' => 'required|integer|exists:rooms,id',
+            'reason' => 'required|string|min:8|max:500',
+        ]);
+
+        $room = Room::findOrFail($data['room_id']);
+        if ($room->is_archived) {
+            return response()->json(['message' => 'Arşivlenmiş odalar için denetim erişimi açılamaz.'], 422);
+        }
+
+        $this->audit->record($request, 'oversight.room_access', Room::class, $room->id, [
+            'room_name' => $room->name,
+            'room_type' => $room->type,
+            'reason' => $data['reason'],
+        ]);
+
+        $message = Message::create([
+            'room_id' => $room->id,
+            'sender_id' => auth()->id(),
+            'content' => 'Denetim erişimi başlatıldı. Gerekçe: '.$data['reason'],
+            'is_system_message' => true,
+        ]);
+
+        try {
+            broadcast(new MessageSent($room->id, [
+                'id' => $message->id,
+                'title' => null,
+                'content' => $message->content,
+                'audio_url' => null,
+                'audio_duration' => null,
+                'is_system_message' => true,
+                'reply_to' => null,
+                'reply_message' => null,
+                'created_at' => $message->created_at->toISOString(),
+                'sender' => [
+                    'id' => auth()->id(),
+                    'username' => auth()->user()->username,
+                    'avatar_url' => auth()->user()->avatar_url,
+                    'role' => auth()->user()->role,
+                ],
+            ]));
+        } catch (\Throwable) {
+            // Audit record is the source of truth; realtime notice is best effort.
+        }
+
+        return response()->json([
+            'ok' => true,
+            'redirect' => route('chat.room', $room->id),
+        ]);
     }
 
     public function postAnnouncement(Request $request)
@@ -249,5 +359,10 @@ class AdminController extends Controller
         }
 
         return false;
+    }
+
+    private function authorizeOversight(): void
+    {
+        abort_unless(auth()->user()?->canAccessOversight(), 403, 'Denetim erişimi yetkiniz yok.');
     }
 }

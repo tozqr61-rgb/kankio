@@ -11,6 +11,8 @@ class Room extends Model
         'type',
         'created_by',
         'is_archived',
+        'archived_at',
+        'archived_by',
         'voice_members_only',
         'voice_requires_permission',
     ];
@@ -19,6 +21,7 @@ class Room extends Model
     {
         return [
             'is_archived' => 'boolean',
+            'archived_at' => 'datetime',
             'voice_members_only' => 'boolean',
             'voice_requires_permission' => 'boolean',
         ];
@@ -38,5 +41,10 @@ class Room extends Model
     public function messages()
     {
         return $this->hasMany(Message::class);
+    }
+
+    public function archivedBy()
+    {
+        return $this->belongsTo(User::class, 'archived_by');
     }
 }

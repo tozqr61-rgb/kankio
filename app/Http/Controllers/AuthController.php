@@ -38,8 +38,12 @@ class AuthController extends Controller
             return back()->withErrors(['username' => 'Kullanıcı adı veya şifre hatalı.'])->withInput();
         }
 
-        if ($user->is_banned) {
-            return back()->withErrors(['username' => 'Hesabınız yasaklanmıştır.'])->withInput();
+        if ($user->is_banned || $user->isDeactivated()) {
+            return back()->withErrors(['username' => 'Bu hesap artık aktif değil.'])->withInput();
+        }
+
+        if ($user->is_bot) {
+            return back()->withErrors(['username' => 'Bu hesapla giriş yapılamaz.'])->withInput();
         }
 
         Auth::login($user, $request->boolean('remember'));

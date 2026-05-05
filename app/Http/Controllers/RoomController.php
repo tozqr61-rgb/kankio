@@ -32,7 +32,10 @@ class RoomController extends Controller
         }
 
         if ($request->type === 'private') {
-            $privateRoomCount = Room::where('created_by', $user->id)->where('type', 'private')->count();
+            $privateRoomCount = Room::where('created_by', $user->id)
+                ->where('type', 'private')
+                ->where('is_archived', false)
+                ->count();
             if ($privateRoomCount >= self::PRIVATE_ROOM_QUOTA) {
                 return response()->json(['error' => 'Özel oda limitine ulaştınız'], 422);
             }
@@ -80,7 +83,11 @@ class RoomController extends Controller
             return response()->json(['error' => 'Erişim reddedildi'], 403);
         }
 
-        $room->delete();
+        $room->update([
+            'is_archived' => true,
+            'archived_at' => now(),
+            'archived_by' => $user->id,
+        ]);
 
         return response()->json(['ok' => true]);
     }

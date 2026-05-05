@@ -1,26 +1,19 @@
 <?php
 
+use App\Models\Room;
+use App\Services\RoomAccessService;
 use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\DB;
 
 if (! function_exists('canAccessBroadcastRoom')) {
     function canAccessBroadcastRoom($user, int $roomId): bool
     {
-        $room = DB::table('rooms')->where('id', $roomId)->first();
+        $room = Room::find($roomId);
         if (! $room) {
             return false;
         }
-        if ($room->type !== 'private') {
-            return true;
-        }
-        if (method_exists($user, 'isAdmin') && $user->isAdmin()) {
-            return true;
-        }
 
-        return DB::table('room_members')
-            ->where('room_id', $roomId)
-            ->where('user_id', $user->id)
-            ->exists();
+        return app(RoomAccessService::class)->canAccessRoom($room, $user);
     }
 }
 
@@ -39,8 +32,7 @@ Broadcast::channel('presence-room.{roomId}', function ($user, $roomId) {
         return false;
     }
 
-    $room = DB::table('rooms')->where('id', $roomId)->first();
-    if (! $room) {
+    if (! canAccessBroadcastRoom($user, (int) $roomId)) {
         return false;
     }
 

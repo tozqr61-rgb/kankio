@@ -9,8 +9,25 @@ class RoomAccessService
 {
     public function canAccessRoom(Room $room, User $user): bool
     {
+        if ($user->isDeactivated() || $user->is_bot) {
+            return false;
+        }
+
+        if ($room->is_archived && ! $user->isAdmin()) {
+            return false;
+        }
+
         if ($user->isAdmin()) {
             return true;
+        }
+
+        if ($user->isOversightAdmin()) {
+            return \App\Models\AdminAction::where('actor_id', $user->id)
+                ->where('action', 'oversight.room_access')
+                ->where('target_type', Room::class)
+                ->where('target_id', (string) $room->id)
+                ->where('created_at', '>=', now()->subMinutes(30))
+                ->exists();
         }
 
         if ($room->type !== 'private') {
@@ -22,6 +39,10 @@ class RoomAccessService
 
     public function canCreateRoom(User $user, string $type): bool
     {
+        if ($user->isDeactivated() || $user->is_bot) {
+            return false;
+        }
+
         if ($type === 'global') {
             return $user->isAdmin();
         }
@@ -31,6 +52,10 @@ class RoomAccessService
 
     public function canModerateRoom(Room $room, User $user): bool
     {
+        if ($user->isDeactivated() || $user->is_bot) {
+            return false;
+        }
+
         if ($user->isAdmin() || (int) $room->created_by === (int) $user->id) {
             return true;
         }

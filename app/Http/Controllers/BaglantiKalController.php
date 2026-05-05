@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\BaglantiKalContent;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
@@ -85,20 +86,10 @@ class BaglantiKalController extends Controller
             'mektup.p4'           => 'string|max:200',
         ]);
 
-        $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
-        $dir = dirname($this->jsonPath);
-        if (! is_dir($dir)) {
-            mkdir($dir, 0755, true);
-        }
-        $tmpPath = $this->jsonPath.'.tmp.'.bin2hex(random_bytes(6));
-        $written = file_put_contents($tmpPath, $json, LOCK_EX);
-
-        if ($written === false || ! rename($tmpPath, $this->jsonPath)) {
-            if (file_exists($tmpPath)) {
-                @unlink($tmpPath);
-            }
-            return response()->json(['message' => 'İçerik dosyası yazılamadı.'], 500);
-        }
+        BaglantiKalContent::updateOrCreate(
+            ['id' => 1],
+            ['content' => $data, 'updated_by' => auth()->id()]
+        );
 
         return response()->json(['ok' => true]);
     }
@@ -106,7 +97,7 @@ class BaglantiKalController extends Controller
     public function uploadAudio(Request $request)
     {
         $request->validate([
-            'audio' => 'required|file|mimes:webm,ogg,mp3,wav,mp4|max:10240',
+            'audio' => 'required|file|mimetypes:audio/webm,audio/ogg,audio/mpeg,audio/wav,audio/mp3,video/mp4,audio/mp4|max:10240',
         ]);
 
         $file     = $request->file('audio');
@@ -130,6 +121,11 @@ class BaglantiKalController extends Controller
 
     private function getContent(): array
     {
+        $stored = BaglantiKalContent::query()->oldest('id')->first();
+        if (is_array($stored?->content)) {
+            return $stored->content;
+        }
+
         if (file_exists($this->jsonPath)) {
             $decoded = json_decode(file_get_contents($this->jsonPath), true);
             if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {

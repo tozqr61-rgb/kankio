@@ -19,8 +19,11 @@ class User extends Authenticatable
         'is_banned',
         'notifications_enabled',
         'presence_mode',
+        'is_bot',
         'last_seen_at',
         'last_avatar_update',
+        'deactivated_at',
+        'deactivated_by',
     ];
 
     protected $hidden = [
@@ -33,15 +36,32 @@ class User extends Authenticatable
         return [
             'password'              => 'hashed',
             'is_banned'             => 'boolean',
+            'is_bot'                => 'boolean',
             'notifications_enabled' => 'boolean',
             'last_seen_at'          => 'datetime',
             'last_avatar_update'    => 'datetime',
+            'deactivated_at'        => 'datetime',
         ];
     }
 
     public function isAdmin(): bool
     {
         return $this->role === 'admin';
+    }
+
+    public function isOversightAdmin(): bool
+    {
+        return $this->role === 'oversight_admin';
+    }
+
+    public function canAccessOversight(): bool
+    {
+        return $this->isAdmin() || $this->isOversightAdmin();
+    }
+
+    public function isDeactivated(): bool
+    {
+        return $this->deactivated_at !== null;
     }
 
     public function rooms()

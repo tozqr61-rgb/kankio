@@ -3,6 +3,7 @@
 use App\Http\Middleware\AdminMiddleware;
 use App\Http\Middleware\CheckBanned;
 use App\Http\Middleware\MaintenanceMode;
+use App\Http\Middleware\OversightMiddleware;
 use App\Http\Middleware\RequestId;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -19,6 +20,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'admin' => AdminMiddleware::class,
             'check.ban' => CheckBanned::class,
+            'oversight' => OversightMiddleware::class,
         ]);
         $middleware->appendToGroup('web', [
             RequestId::class,

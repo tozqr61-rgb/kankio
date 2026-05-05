@@ -1,4 +1,5 @@
 import { createVoiceRuntime, stopPermissionStream } from './voice-client';
+import { GAME_EVENTS, handleGameMessage, normalizeGameUrl } from './game-overlay';
 import { isDocumentHidden } from './presence';
 import { safeJson } from './message-actions';
 
@@ -13,14 +14,6 @@ const BROADCAST_CONFIG = boot.broadcastConfig || window.KANKIO_BROADCAST_CONFIG 
 const NOTIFICATIONS_ENABLED = !!boot.notificationsEnabled;
 const ARCHIVED_COUNT = Number(boot.archivedCount || 0);
 const ROOM_NAME = boot.roomName || '';
-const GAME_EVENTS = {
-    CLOSE: 'game:close',
-    LOADED: 'game:loaded',
-    FINISHED: 'game:session-finished',
-    TOAST: 'game:toast',
-    ERROR: 'game:error',
-};
-
 /* LiveKit runtime — NOT inside Alpine reactive state to avoid DataCloneError
    when LiveKit SDK internally calls structuredClone on proxied objects. */
 const KankioVoiceRuntime = createVoiceRuntime();
@@ -75,6 +68,8 @@ window.chatRoom = function chatRoom() {
 
         /* Music state */
         musicState: { video_id: null, video_title: null, is_playing: false, position: 0, queue: [] },
+        musicPlaybackUnlocked: false,
+        showMusicUnlockPrompt: false,
         _ytIframe: null,             /* direct iframe element */
         _ytCurVid: '',               /* video_id currently in the iframe */
         _ytCurPlay: null,            /* is_playing state currently applied */
@@ -181,19 +176,12 @@ window.chatRoom = function chatRoom() {
             window._changeRoom = (id, name) => this.changeRoom(id, name);
 
             window.addEventListener('message', (event) => {
-                if (event.origin !== window.location.origin) return;
-                if (event.data?.type === GAME_EVENTS.CLOSE || event.data?.type === 'kankio:close-game') {
-                    this.closeIsimSehirGame();
-                }
-                if (event.data?.type === GAME_EVENTS.LOADED) {
-                    this.gameOpen = true;
-                }
-                if (event.data?.type === GAME_EVENTS.FINISHED) {
-                    showToast('Oyun bitti. Sonuçlar oyun ekranında kalıyor.');
-                }
-                if (event.data?.type === GAME_EVENTS.TOAST || event.data?.type === GAME_EVENTS.ERROR || event.data?.type === 'kankio:toast') {
-                    showToast(event.data.message || 'Oyun işlemi tamamlanamadı', event.data.level === 'error' ? 'error' : 'success');
-                }
+                handleGameMessage(event, {
+                    close: () => this.closeIsimSehirGame(),
+                    loaded: () => { this.gameOpen = true; },
+                    finished: () => showToast('Oyun bitti. Sonuçlar oyun ekranında kalıyor.'),
+                    toast: (data) => showToast(data.message || 'Oyun işlemi tamamlanamadı', data.level === 'error' ? 'error' : 'success'),
+                });
             });
 
             window.addEventListener('presence-mode-changed', (event) => {
@@ -591,6 +579,15 @@ window.chatRoom = function chatRoom() {
             this._idleCount = 0;
             this._playSound();
             this.$nextTick(() => this.scrollToBottom());
+            this._handleBotData(msg.bot_data);
+        },
+
+        _handleBotData(botData) {
+            if (!botData || !botData.action) return;
+            if (botData.action === 'game:open' && botData.game_url) {
+                this.gameUrl  = botData.game_url;
+                this.gameOpen = true;
+            }
         },
 
         async sendTyping(isTyping) {
@@ -976,6 +973,7 @@ window.chatRoom = function chatRoom() {
             /* Discord-style: music only plays when user is in voice chat */
             if (!this.voiceState.in_voice) {
                 if (this._ytIframe) { this._ytCmd('pauseVideo'); }
+                this.showMusicUnlockPrompt = false;
                 return;
             }
 
@@ -984,6 +982,13 @@ window.chatRoom = function chatRoom() {
                 this._ytCurVid = ''; this._ytCurPlay = null;
                 this._knownDuration = 0; this._lastCurrentTime = 0;
                 this._playerMuted = true; /* reset: next track starts muted */
+                this.musicPlaybackUnlocked = false;
+                this.showMusicUnlockPrompt = false;
+                return;
+            }
+
+            if (!this.musicPlaybackUnlocked && state.is_playing) {
+                this.showMusicUnlockPrompt = true;
                 return;
             }
 
@@ -1046,6 +1051,8 @@ window.chatRoom = function chatRoom() {
         muteToggle() {
             if (!this.musicState.video_id) return;
             if (this._playerMuted) {
+                this.musicPlaybackUnlocked = true;
+                this.showMusicUnlockPrompt = false;
                 /* User gesture context (click/tap): reload iframe with sound.
                    This is the ONLY reliable way on iOS Safari — postMessage
                    unMute() is NOT treated as a user gesture inside the iframe.
@@ -1066,6 +1073,14 @@ window.chatRoom = function chatRoom() {
                 this._ytCmd('mute');
                 this._playerMuted = true;
             }
+        },
+
+        unlockMusicPlayback() {
+            if (!this.musicState.video_id) return;
+            this.musicPlaybackUnlocked = true;
+            this.showMusicUnlockPrompt = false;
+            this._playerMuted = true;
+            this.muteToggle();
         },
 
         async _onVideoEnded() {
@@ -1098,9 +1113,7 @@ window.chatRoom = function chatRoom() {
                 });
                 const data = await this._safeJson(r, 'Oyun API');
                 if (!r.ok) throw new Error(data.message || 'Oyun başlatılamadı');
-                const url = new URL(data.redirect, window.location.origin);
-                url.searchParams.set('embedded', '1');
-                this.gameUrl = url.toString();
+                this.gameUrl = normalizeGameUrl(data.redirect);
                 this.gameOpen = true;
             } catch (e) {
                 showToast(e.message || 'Oyun başlatılamadı', 'error');

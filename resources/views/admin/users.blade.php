@@ -23,6 +23,15 @@
                         @if($user->role === 'admin')
                         <span class="text-[10px] px-2 py-0.5 rounded-full border" style="background:rgba(244,63,94,0.15);color:rgba(251,113,133,1);border-color:rgba(244,63,94,0.25)">Yönetici</span>
                         @endif
+                        @if($user->role === 'oversight_admin')
+                        <span class="text-[10px] px-2 py-0.5 rounded-full border" style="background:rgba(59,130,246,0.15);color:rgba(147,197,253,1);border-color:rgba(59,130,246,0.25)">Denetim</span>
+                        @endif
+                        @if($user->is_bot)
+                        <span class="text-[10px] px-2 py-0.5 rounded-full border" style="background:rgba(168,85,247,0.15);color:rgba(216,180,254,1);border-color:rgba(168,85,247,0.25)">Bot</span>
+                        @endif
+                        @if($user->deactivated_at)
+                        <span class="text-[10px] px-2 py-0.5 rounded-full border" style="background:rgba(113,113,122,0.15);color:rgba(212,212,216,1);border-color:rgba(113,113,122,0.25)">Pasif</span>
+                        @endif
                         @if($user->is_banned)
                         <span class="text-[10px] px-2 py-0.5 rounded-full border" style="background:rgba(239,68,68,0.15);color:rgba(248,113,113,1);border-color:rgba(239,68,68,0.25)">Yasaklı</span>
                         @endif
@@ -36,6 +45,11 @@
                     class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-all"
                     style="{{ $user->role === 'admin' ? 'border-color:rgba(99,102,241,0.3);color:rgba(165,180,252,1)' : 'border-color:rgba(52,211,153,0.3);color:rgba(52,211,153,1)' }}">
                     {{ $user->role === 'admin' ? 'Yöneticilikten Al' : 'Yönetici Yap' }}
+                </button>
+                <button @click="setRole({{ $user->id }}, '{{ $user->role === 'oversight_admin' ? 'user' : 'oversight_admin' }}')"
+                    class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-all"
+                    style="border-color:rgba(59,130,246,0.3);color:rgba(147,197,253,1)">
+                    {{ $user->role === 'oversight_admin' ? 'Denetimden Al' : 'Denetim Yap' }}
                 </button>
                 @endif
                 <button @click="banUser({{ $user->id }}, {{ $user->is_banned ? 'true' : 'false' }}, $el)"
@@ -84,11 +98,24 @@ function adminUsers() {
             setTimeout(() => location.reload(), 800);
         },
         async deleteUser(userId, username, row) {
-            if (!confirm(`DİKKAT! "${username}" adlı kullanıcıyı TAMAMEN silmek üzeresiniz.\nBu işlem geri alınamaz!`)) return;
-            if (!confirm('Son Karar: Kullanıcı veritabanından silinsin mi?')) return;
+            if (!confirm(`"${username}" adlı kullanıcı pasifleştirilip anonimleştirilecek. Devam edilsin mi?`)) return;
+            if (!confirm('Son karar: Hesap girişe kapatılsın ve kimliği anonimleştirilsin mi?')) return;
             const r = await fetch(`/admin/users/${userId}`, { method: 'DELETE', headers: { 'X-CSRF-TOKEN': CSRF } });
-            if (r.ok) { showToast('Kullanıcı silindi'); row.remove(); }
+            if (r.ok) { showToast('Kullanıcı pasifleştirildi'); row.remove(); }
             else showToast('Hata oluştu', 'error');
+        },
+
+        async setRole(userId, role) {
+            if (!confirm(`Kullanıcı rolü "${role}" yapılacak. Emin misiniz?`)) return;
+            const r = await fetch(`/admin/users/${userId}/role`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
+                body: JSON.stringify({ role })
+            });
+            const d = await r.json();
+            if (d.error) { showToast(d.error, 'error'); return; }
+            showToast('Kullanıcı rolü güncellendi');
+            setTimeout(() => location.reload(), 800);
         }
     }
 }

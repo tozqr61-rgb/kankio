@@ -202,6 +202,12 @@
                 </svg>
             </button>
         </div>
+        <button x-show="showMusicUnlockPrompt && voiceState.in_voice"
+                @click="unlockMusicPlayback()"
+                class="w-full py-2 rounded-lg text-xs font-semibold transition-all"
+                style="background:rgba(16,185,129,0.2);color:rgba(52,211,153,1)">
+            Müziği Etkinleştir
+        </button>
         <p class="text-[9px] text-zinc-600 text-center">/play /durdur /geç /sıra /devam</p>
     </div>
 

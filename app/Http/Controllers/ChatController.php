@@ -15,6 +15,10 @@ use Illuminate\Support\Facades\Log;
 
 class ChatController extends Controller
 {
+    private const PRESENCE_INDEX_KEY = 'presence:user_ids';
+
+    private const PRESENCE_TTL_SECONDS = 90;
+
     public function __construct(private RoomAccessService $roomAccess)
     {
     }
@@ -25,6 +29,7 @@ class ChatController extends Controller
 
         // Redirect to first accessible room automatically
         $firstRoom = Room::where('type', 'global')
+            ->where('is_archived', false)
             ->orderBy('id', 'asc')
             ->first();
 
@@ -187,11 +192,13 @@ class ChatController extends Controller
     {
         if ($user->isAdmin()) {
             return Room::where('type', '!=', 'dm')
+                ->where('is_archived', false)
                 ->orderBy('created_at', 'asc')
                 ->get();
         }
 
         return Room::where('type', '!=', 'dm')
+            ->where('is_archived', false)
             ->where(function ($q) use ($user) {
                 $q->where('type', 'global')
                     ->orWhere('type', 'announcements')
@@ -238,21 +245,14 @@ class ChatController extends Controller
     {
         $user = Auth::user();
         $status = $request->input('status', 'online');
-        $onlineUsers = \Cache::get('online_users', []);
 
         if ($status === 'offline' || $this->isInvisible($user)) {
-            /* Immediately remove user on explicit offline signal */
-            foreach ($onlineUsers as $key => $entry) {
-                if ((int) ($entry['id'] ?? $key) === (int) $user->id) {
-                    unset($onlineUsers[$key]);
-                }
-            }
-            \Cache::put('online_users', $onlineUsers, 300);
+            $this->forgetPresence($user->id);
 
-            return response()->json(['ok' => true, 'users' => array_values($this->pruneOnlineUsers($onlineUsers))]);
+            return response()->json(['ok' => true, 'users' => array_values($this->visibleOnlineUsers())]);
         }
 
-        $onlineUsers[$user->id] = [
+        $entry = [
             'id' => $user->id,
             'username' => $user->username,
             'avatar_url' => $user->avatar_url,
@@ -261,14 +261,11 @@ class ChatController extends Controller
             'last_seen' => now()->timestamp,
         ];
 
-        $onlineUsers = $this->pruneOnlineUsers($onlineUsers);
-
-        /* Store with ID keys so we can upsert without duplicates */
-        \Cache::put('online_users', $onlineUsers, 300);
+        $this->storePresence($user->id, $entry);
 
         $user->update(['last_seen_at' => now()]);
 
-        return response()->json(['ok' => true, 'users' => array_values($onlineUsers)]);
+        return response()->json(['ok' => true, 'users' => array_values($this->visibleOnlineUsers())]);
     }
 
     public function unreadCounts()
@@ -490,7 +487,23 @@ class ChatController extends Controller
 
     private function visibleOnlineUsers(): array
     {
-        return $this->pruneOnlineUsers(\Cache::get('online_users', []));
+        $ids = array_values(array_unique(array_map('intval', \Cache::get(self::PRESENCE_INDEX_KEY, []))));
+        $onlineUsers = [];
+        $liveIds = [];
+
+        foreach ($ids as $id) {
+            $entry = \Cache::get($this->presenceKey($id));
+            if (! is_array($entry)) {
+                continue;
+            }
+
+            $onlineUsers[$id] = $entry;
+            $liveIds[] = $id;
+        }
+
+        \Cache::put(self::PRESENCE_INDEX_KEY, $liveIds, self::PRESENCE_TTL_SECONDS * 2);
+
+        return $this->pruneOnlineUsers($onlineUsers);
     }
 
     private function pruneOnlineUsers(array $onlineUsers): array
@@ -504,20 +517,60 @@ class ChatController extends Controller
         $invisibleIds = $ids === []
             ? []
             : \App\Models\User::whereIn('id', $ids)
-                ->where('presence_mode', 'invisible')
+                ->where(function ($q) {
+                    $q->where('presence_mode', 'invisible')
+                        ->orWhereNotNull('deactivated_at')
+                        ->orWhere('is_bot', true);
+                })
                 ->pluck('id')
                 ->map(fn ($id) => (int) $id)
                 ->all();
 
         foreach ($onlineUsers as $uid => $u) {
             $userId = (int) ($u['id'] ?? $uid);
-            if (($now - ($u['last_seen'] ?? 0)) >= 45 || in_array($userId, $invisibleIds, true)) {
+            if (($now - ($u['last_seen'] ?? 0)) >= self::PRESENCE_TTL_SECONDS || in_array($userId, $invisibleIds, true)) {
                 unset($onlineUsers[$uid]);
+                $this->forgetPresence($userId);
             }
         }
 
-        \Cache::put('online_users', $onlineUsers, 300);
-
         return $onlineUsers;
+    }
+
+    private function storePresence(int $userId, array $entry): void
+    {
+        \Cache::put($this->presenceKey($userId), $entry, self::PRESENCE_TTL_SECONDS);
+
+        $ids = array_values(array_unique(array_merge(
+            array_map('intval', \Cache::get(self::PRESENCE_INDEX_KEY, [])),
+            [$userId],
+        )));
+
+        \Cache::put(self::PRESENCE_INDEX_KEY, $ids, self::PRESENCE_TTL_SECONDS * 2);
+    }
+
+    private function forgetPresence(int $userId): void
+    {
+        \Cache::forget($this->presenceKey($userId));
+
+        $ids = array_values(array_filter(
+            array_map('intval', \Cache::get(self::PRESENCE_INDEX_KEY, [])),
+            fn ($id) => $id !== $userId,
+        ));
+
+        \Cache::put(self::PRESENCE_INDEX_KEY, $ids, self::PRESENCE_TTL_SECONDS * 2);
+
+        $legacy = \Cache::get('online_users', []);
+        foreach ($legacy as $key => $entry) {
+            if ((int) ($entry['id'] ?? $key) === $userId) {
+                unset($legacy[$key]);
+            }
+        }
+        \Cache::put('online_users', $legacy, 300);
+    }
+
+    private function presenceKey(int $userId): string
+    {
+        return "presence:user:{$userId}";
     }
 }

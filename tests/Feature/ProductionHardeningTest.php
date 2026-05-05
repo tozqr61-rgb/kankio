@@ -7,6 +7,8 @@ use App\Events\MessagesRead;
 use App\Events\UserTyping;
 use App\Models\AdminAction;
 use App\Models\AppRelease;
+use App\Models\BaglantiKalContent;
+use App\Models\Bot;
 use App\Models\InviteCode;
 use App\Models\Message;
 use App\Models\RoomMusicState;
@@ -471,6 +473,7 @@ class ProductionHardeningTest extends TestCase
     {
         $admin = User::factory()->create(['role' => 'admin']);
         $target = User::factory()->create();
+        $room = Room::create(['name' => 'Archive me', 'type' => 'global', 'created_by' => $admin->id]);
 
         $this->actingAs($admin)
             ->deleteJson(route('admin.user.delete', $target->id))
@@ -478,10 +481,145 @@ class ProductionHardeningTest extends TestCase
 
         $this->assertDatabaseHas('admin_actions', [
             'actor_id' => $admin->id,
-            'action' => 'user.delete',
+            'action' => 'user.deactivate_anonymize',
             'target_type' => User::class,
             'target_id' => (string) $target->id,
         ]);
+        $this->assertDatabaseHas('users', [
+            'id' => $target->id,
+            'username' => 'deleted_user_'.$target->id,
+            'is_banned' => true,
+        ]);
+
+        $this->actingAs($admin)
+            ->deleteJson(route('admin.room.delete', $room->id))
+            ->assertOk();
+
+        $this->assertDatabaseHas('rooms', [
+            'id' => $room->id,
+            'is_archived' => true,
+            'archived_by' => $admin->id,
+        ]);
+    }
+
+    public function test_message_delete_soft_deletes_and_records_actor(): void
+    {
+        $owner = User::factory()->create();
+        $room = Room::create(['name' => 'Soft Delete', 'type' => 'global', 'created_by' => $owner->id]);
+        $message = Message::create([
+            'room_id' => $room->id,
+            'sender_id' => $owner->id,
+            'content' => 'Delete me',
+        ]);
+
+        $this->actingAs($owner)
+            ->deleteJson(route('api.message.destroy', [$room->id, $message->id]))
+            ->assertOk();
+
+        $this->assertSoftDeleted('messages', ['id' => $message->id]);
+        $this->assertDatabaseHas('messages', [
+            'id' => $message->id,
+            'deleted_by' => $owner->id,
+        ]);
+    }
+
+    public function test_deactivated_and_bot_users_cannot_login(): void
+    {
+        $deactivated = User::factory()->create([
+            'username' => 'pasif',
+            'email' => 'pasif@kank.com',
+            'password' => bcrypt('secret123'),
+            'deactivated_at' => now(),
+        ]);
+        $bot = User::factory()->create([
+            'username' => 'botuser',
+            'email' => 'botuser@kank.com',
+            'password' => bcrypt('secret123'),
+            'is_bot' => true,
+        ]);
+
+        $this->post(route('login.post'), ['username' => $deactivated->username, 'password' => 'secret123'])
+            ->assertSessionHasErrors('username');
+
+        $this->post(route('login.post'), ['username' => $bot->username, 'password' => 'secret123'])
+            ->assertSessionHasErrors('username');
+    }
+
+    public function test_oversight_access_requires_reason_logs_and_unlocks_broadcast_access(): void
+    {
+        $owner = User::factory()->create();
+        $oversight = User::factory()->create(['role' => 'oversight_admin']);
+        $room = Room::create(['name' => 'Private Audit', 'type' => 'private', 'created_by' => $owner->id]);
+
+        $this->actingAs($oversight)
+            ->postJson(route('admin.oversight.access'), ['room_id' => $room->id, 'reason' => 'short'])
+            ->assertStatus(422);
+
+        $this->assertFalse(canAccessBroadcastRoom($oversight, $room->id));
+
+        Event::fake([MessageSent::class]);
+        $this->actingAs($oversight)
+            ->postJson(route('admin.oversight.access'), [
+                'room_id' => $room->id,
+                'reason' => 'Moderasyon denetim kaydı için erişim.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('ok', true);
+
+        $this->assertDatabaseHas('admin_actions', [
+            'actor_id' => $oversight->id,
+            'action' => 'oversight.room_access',
+            'target_id' => (string) $room->id,
+        ]);
+        $this->assertTrue(canAccessBroadcastRoom($oversight->fresh(), $room->id));
+        Event::assertDispatched(MessageSent::class);
+    }
+
+    public function test_baglanti_kal_content_is_saved_to_database(): void
+    {
+        config([
+            'services.baglantikal.access_pin' => '1071',
+            'services.baglantikal.letter_pin' => '2022',
+        ]);
+        $admin = User::factory()->create(['role' => 'admin']);
+        $payload = [
+            'muzik_id' => 'abc123',
+            'achievements' => [['icon' => '*', 'title' => 'Baslik', 'desc' => 'Aciklama']],
+            'memories' => [['icon' => '*', 'caption' => 'Ani', 'detail' => 'Detay', 'img' => null]],
+            'boxes' => [['fi' => '*', 'bi' => '*', 'bt' => 'Kutu', 'bc' => 'Icerik', 'audio' => null]],
+            'mektup' => ['p1' => 'A', 'p2' => 'B', 'p3' => 'C', 'p4' => 'D'],
+        ];
+
+        $this->actingAs($admin)
+            ->postJson(route('stay.save'), $payload)
+            ->assertOk();
+
+        $this->assertDatabaseHas('baglanti_kal_contents', ['id' => 1, 'updated_by' => $admin->id]);
+        $this->assertSame('abc123', BaglantiKalContent::find(1)->content['muzik_id']);
+
+        $this->postJson(route('stay.unlock'), ['pin' => '1071'])
+            ->assertOk()
+            ->assertJsonPath('content.muzik_id', 'abc123')
+            ->assertJsonMissingPath('content.mektup');
+    }
+
+    public function test_bot_event_dispatch_is_idempotent(): void
+    {
+        $room = Room::create(['name' => 'Bot Event', 'type' => 'global']);
+        $botUser = User::factory()->create(['is_bot' => true, 'presence_mode' => 'invisible']);
+        Bot::create([
+            'user_id' => $botUser->id,
+            'bot_key' => \App\Services\Bots\Bots\GameBot::BOT_KEY,
+            'display_name' => 'Game Bot',
+            'is_active' => true,
+        ]);
+
+        Event::fake([MessageSent::class]);
+        $manager = app(\App\Services\Bots\BotManager::class);
+        $manager->broadcastEvent('game.round_started', ['event_id' => 'round-1', 'room_id' => $room->id, 'round_no' => 1], $room);
+        $manager->broadcastEvent('game.round_started', ['event_id' => 'round-1', 'room_id' => $room->id, 'round_no' => 1], $room);
+
+        $this->assertLessThanOrEqual(1, Message::where('room_id', $room->id)->where('sender_id', $botUser->id)->count());
     }
 
     public function test_should_validate_app_release_host_and_checksum(): void
