@@ -1,85 +1,47 @@
-# Kankio - Laravel Kurulum Rehberi
+# Kankio Kurulum
 
 ## Gereksinimler
-- XAMPP (PHP 8.2+, MySQL, Apache)
+
+- PHP 8.2+
 - Composer
-- Node.js (npm)
+- Node.js ve npm
+- Desteklenen veritabanı
+- Redis veya Laravel cache/session için uygun backend
+- Reverb için websocket portu
+- LiveKit sunucusu veya LiveKit Cloud hesabı
 
-## Kurulum Adımları
+## Adımlar
 
-### 1. Veritabanı Oluştur
-XAMPP phpMyAdmin'den `kankio` adında bir veritabanı oluşturun.
-
-### 2. .env Dosyası
 ```bash
 cp .env.example .env
-```
-`.env` dosyasını açıp kontrol edin (DB_DATABASE=kankio, DB_USERNAME=root).
-
-### 3. Composer Bağımlılıkları
-```bash
 composer install
-```
-
-### 4. Uygulama Anahtarı
-```bash
+npm ci
 php artisan key:generate
-```
-
-### 5. Migrations
-```bash
 php artisan migrate
-```
-
-### 6. Seed (Admin kullanıcı + varsayılan oda + davetiyeler)
-```bash
-php artisan db:seed
-```
-
-### 7. Storage Symlink (avatar yükleme için)
-```bash
 php artisan storage:link
+php artisan app:create-admin
+npm run build
+php artisan serve
 ```
 
-### 8. Apache ile Çalıştırma
-XAMPP Apache'yi başlatın. Tarayıcıda açın:
+## Reverb
+
+`.env` içinde `REVERB_APP_ID`, `REVERB_APP_KEY`, `REVERB_APP_SECRET`, `REVERB_HOST`, `REVERB_PORT` ve `REVERB_SCHEME` değerlerini production ortamına özel üretin. Örnek değerleri canlıya taşımayın.
+
+## LiveKit
+
+Sesli sohbet için `LIVEKIT_URL`, `LIVEKIT_API_KEY` ve `LIVEKIT_API_SECRET` zorunludur. Eksikse voice join endpoint’i JSON hata döner.
+
+## Bağlantıda Kal
+
+`BAGLANTIKAL_ACCESS_PIN` ve `BAGLANTIKAL_LETTER_PIN` canlı ortamda boş bırakılamaz. Public sayfa içerik preload etmez; içerik sadece doğru PIN sonrası JSON ile alınır.
+
+## Tauri
+
+Desktop build:
+
+```bash
+npm run tauri:build
 ```
-http://localhost/proje/Kank/public
-```
 
-## Varsayılan Giriş Bilgileri
-- **Kullanıcı Adı:** admin
-- **Şifre:** admin123
-
-## Kayıt için Davetiye Kodları
-- `KNK-ALPHA`
-- `KNK-BETA0`
-- `KNK-GAMMA`
-
-## Özellikler
-- Gerçek zamanlı mesajlaşma (2 saniyelik polling)
-- Oda oluşturma (Global / Gizli)
-- Çevrimiçi kullanıcı listesi
-- Profil resmi yükleme (7 günlük limit)
-- Bildirim sesi
-- Admin paneli (kullanıcı/oda/davetiye yönetimi)
-- Mesaj yanıtlama
-- Admin mesaj silme
-- Davetiye kodu sistemi
-- Yasaklama sistemi
-
-# 1. Bağımlılıkları kur (Arch)
-sudo pacman -S webkit2gtk-4.1 gtk3 libayatana-appindicator openssl base-devel
-
-# 2. Rust + Tauri CLI (yoksa)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-cargo install tauri-cli
-
-# 3a. Otomatik build (script ile)
-cd src-tauri && ./build-linux.sh
-
-# 3b. Manuel build
-cargo tauri build
-
-# 4. Veya Arch paketi olarak kur
-cd src-tauri && makepkg -si
+Tauri istemci remote shell olarak `https://kank.com.tr` açar. Mikrofon izni Linux/WebKit tarafında yalnızca beklenen chat origin/path için otomatik verilir.

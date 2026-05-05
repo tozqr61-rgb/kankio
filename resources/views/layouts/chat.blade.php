@@ -14,11 +14,37 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Kankio">
     <link rel="apple-touch-icon" href="{{ url('icons/icon.svg') }}">
-    <script src="https://cdn.tailwindcss.com"></script>
+    @vite('resources/css/app.css')
     <script src="https://cdn.jsdelivr.net/npm/pusher-js@8.4.0/dist/web/pusher.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/laravel-echo@1.16.1/dist/echo.iife.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    @php
+        $broadcastConfig = [
+            'reverb' => [
+                'key' => config('broadcasting.connections.reverb.key'),
+                'host' => config('broadcasting.connections.reverb.options.host'),
+                'port' => config('broadcasting.connections.reverb.options.port'),
+                'scheme' => config('broadcasting.connections.reverb.options.scheme'),
+            ],
+            'pusher' => [
+                'key' => config('broadcasting.connections.pusher.key'),
+                'cluster' => config('broadcasting.connections.pusher.options.cluster'),
+                'scheme' => config('broadcasting.connections.pusher.options.scheme') ?: 'https',
+            ],
+        ];
+    @endphp
+    <script>
+        window.KANKIO_BROADCAST_DRIVER = @json(config('broadcasting.default'));
+        window.KANKIO_BROADCAST_CONFIG = @json($broadcastConfig);
+        window.__kankioLoadAlpine = () => {
+            if (window.__kankioAlpineLoading || window.Alpine) return;
+            window.__kankioAlpineLoading = true;
+            const script = document.createElement('script');
+            script.defer = true;
+            script.src = 'https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js';
+            document.head.appendChild(script);
+        };
+    </script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,300;1,400&display=swap');
         .font-serif { font-family: 'EB Garamond', Georgia, serif; }
@@ -379,6 +405,9 @@
                 } catch(e) { showToast('Oda silinemedi', 'error'); }
             }
         }
+    }
+    if (!window.KANKIO_CHAT_BOOTSTRAP && !window.ISIM_SEHIR_BOOTSTRAP) {
+        window.__kankioLoadAlpine?.();
     }
     </script>
 </body>

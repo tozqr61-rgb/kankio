@@ -8,6 +8,7 @@ use Agence104\LiveKit\VideoGrant;
 use App\Events\VoiceParticipantUpdated;
 use App\Events\VoiceStateChanged;
 use App\Models\Room;
+use App\Services\RoomAccessService;
 use App\Support\AppMetrics;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -19,12 +20,16 @@ class VoiceController extends Controller
 {
     private const STALE_SECONDS = 20;
 
+    public function __construct(private RoomAccessService $roomAccess)
+    {
+    }
+
     public function join(Request $request, $roomId)
     {
         $user = Auth::user();
         $room = Room::find($roomId);
 
-        if (! $room || ! $this->canJoinVoice($room, $user)) {
+        if (! $room || ! $this->roomAccess->canJoinVoice($room, $user)) {
             return response()->json(['error' => 'Erisim reddedildi'], 403);
         }
 
@@ -52,7 +57,7 @@ class VoiceController extends Controller
             ->where('user_id', $user->id)
             ->first();
 
-        $canModerate = $this->canModerateVoice($room, $user);
+        $canModerate = $this->roomAccess->canModerateVoice($room, $user);
         $canSpeak = $existing
             ? (bool) $existing->can_speak
             : (! $room->voice_requires_permission || $canModerate);
@@ -119,6 +124,11 @@ class VoiceController extends Controller
     public function leave($roomId)
     {
         $user = Auth::user();
+        $room = Room::find($roomId);
+
+        if (! $room || ! $this->roomAccess->canAccessRoom($room, $user)) {
+            return response()->json(['error' => 'Erisim reddedildi'], 403);
+        }
 
         DB::table('voice_sessions')
             ->where('room_id', $roomId)
@@ -141,6 +151,12 @@ class VoiceController extends Controller
     public function toggleMute(Request $request, $roomId)
     {
         $user = Auth::user();
+        $room = Room::find($roomId);
+
+        if (! $room || ! $this->roomAccess->canJoinVoice($room, $user)) {
+            return response()->json(['error' => 'Erisim reddedildi'], 403);
+        }
+
         $session = $this->activeSession((int) $roomId, $user->id);
 
         if (! $session) {
@@ -178,6 +194,12 @@ class VoiceController extends Controller
     public function toggleDeafen(Request $request, $roomId)
     {
         $user = Auth::user();
+        $room = Room::find($roomId);
+
+        if (! $room || ! $this->roomAccess->canJoinVoice($room, $user)) {
+            return response()->json(['error' => 'Erisim reddedildi'], 403);
+        }
+
         $session = $this->activeSession((int) $roomId, $user->id);
 
         if (! $session) {
@@ -211,6 +233,12 @@ class VoiceController extends Controller
     {
         $data = $request->validate(['is_speaking' => 'required|boolean']);
         $user = Auth::user();
+        $room = Room::find($roomId);
+
+        if (! $room || ! $this->roomAccess->canJoinVoice($room, $user)) {
+            return response()->json(['error' => 'Erisim reddedildi'], 403);
+        }
+
         $session = $this->activeSession((int) $roomId, $user->id);
 
         if (! $session) {
@@ -250,6 +278,12 @@ class VoiceController extends Controller
         ]);
 
         $user = Auth::user();
+        $room = Room::find($roomId);
+
+        if (! $room || ! $this->roomAccess->canJoinVoice($room, $user)) {
+            return response()->json(['error' => 'Erisim reddedildi'], 403);
+        }
+
         $session = $this->activeSession((int) $roomId, $user->id);
 
         if (! $session) {
@@ -277,7 +311,7 @@ class VoiceController extends Controller
         $user = Auth::user();
         $room = Room::find($roomId);
 
-        if (! $room || ! $this->canJoinVoice($room, $user)) {
+        if (! $room || ! $this->roomAccess->canJoinVoice($room, $user)) {
             return response()->json(['error' => 'Erisim reddedildi'], 403);
         }
 
@@ -295,7 +329,7 @@ class VoiceController extends Controller
         $user = Auth::user();
         $room = Room::findOrFail($roomId);
 
-        if (! $this->canModerateVoice($room, $user)) {
+        if (! $this->roomAccess->canModerateVoice($room, $user)) {
             return response()->json(['error' => 'Erisim reddedildi'], 403);
         }
 
@@ -321,7 +355,7 @@ class VoiceController extends Controller
         $user = Auth::user();
         $room = Room::findOrFail($roomId);
 
-        if (! $this->canModerateVoice($room, $user)) {
+        if (! $this->roomAccess->canModerateVoice($room, $user)) {
             return response()->json(['error' => 'Erisim reddedildi'], 403);
         }
 
@@ -350,7 +384,7 @@ class VoiceController extends Controller
         $user = Auth::user();
         $room = Room::findOrFail($roomId);
 
-        if (! $this->canModerateVoice($room, $user)) {
+        if (! $this->roomAccess->canModerateVoice($room, $user)) {
             return response()->json(['error' => 'Erisim reddedildi'], 403);
         }
 
@@ -380,7 +414,7 @@ class VoiceController extends Controller
         $user = Auth::user();
         $room = Room::findOrFail($roomId);
 
-        if (! $this->canModerateVoice($room, $user)) {
+        if (! $this->roomAccess->canModerateVoice($room, $user)) {
             return response()->json(['error' => 'Erisim reddedildi'], 403);
         }
 
@@ -452,7 +486,7 @@ class VoiceController extends Controller
             'can_speak' => $mySession ? (bool) $mySession->can_speak : true,
             'connection_quality' => $mySession->connection_quality ?? 'unknown',
             'reconnect_count' => (int) ($mySession->reconnect_count ?? 0),
-            'can_moderate' => $this->canModerateVoice($room, $user),
+            'can_moderate' => $this->roomAccess->canModerateVoice($room, $user),
             'settings' => [
                 'voice_members_only' => (bool) $room->voice_members_only,
                 'voice_requires_permission' => (bool) $room->voice_requires_permission,
@@ -514,33 +548,6 @@ class VoiceController extends Controller
             ->where('user_id', $userId)
             ->where('is_active', true)
             ->first();
-    }
-
-    private function canJoinVoice(Room $room, $user): bool
-    {
-        if ($user->isAdmin()) {
-            return true;
-        }
-        if ($room->type === 'private' || $room->voice_members_only) {
-            return $room->members()->where('user_id', $user->id)->exists();
-        }
-
-        return true;
-    }
-
-    private function canModerateVoice(Room $room, $user): bool
-    {
-        if ($user->isAdmin()) {
-            return true;
-        }
-        if ((int) $room->created_by === (int) $user->id) {
-            return true;
-        }
-
-        return $room->members()
-            ->where('user_id', $user->id)
-            ->wherePivotIn('role', ['owner', 'admin'])
-            ->exists();
     }
 
     private function applyVoiceSettingsToActiveSessions(Room $room, $moderator): void

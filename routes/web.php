@@ -4,6 +4,7 @@ use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BaglantiKalController;
 use App\Http\Controllers\ChatController;
+use App\Http\Controllers\GameController;
 use App\Http\Controllers\MessageController;
 use App\Http\Controllers\MusicController;
 use App\Http\Controllers\ProfileController;
@@ -31,8 +32,8 @@ Route::get('/offline', fn () => view('offline'))->name('pwa.offline');
 
 // Auth
 Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
-Route::post('/login', [AuthController::class, 'login'])->name('login.post');
-Route::post('/register', [AuthController::class, 'register'])->name('register.post');
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1')->name('login.post');
+Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:5,5')->name('register.post');
 Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 
 // Chat (authenticated)
@@ -43,47 +44,63 @@ Route::middleware('auth')->group(function () {
     // Chat API (Realtime primary, polling fallback)
     Route::get('/api/chat/{roomId}/messages', [ChatController::class, 'poll'])->name('api.poll');
     Route::get('/api/chat/{roomId}/bootstrap', [ChatController::class, 'bootstrap'])->name('api.chat.bootstrap');
-    Route::post('/api/chat/{roomId}/messages', [MessageController::class, 'store'])->name('api.message.store');
-    Route::delete('/api/chat/{roomId}/messages/{messageId}', [MessageController::class, 'destroy'])->name('api.message.destroy');
+    Route::post('/api/chat/{roomId}/messages', [MessageController::class, 'store'])->middleware('throttle:30,1')->name('api.message.store');
+    Route::delete('/api/chat/{roomId}/messages/{messageId}', [MessageController::class, 'destroy'])->middleware('throttle:20,1')->name('api.message.destroy');
     Route::post('/api/chat/{roomId}/seen', [ChatController::class, 'markSeen'])->name('api.message.seen');
-    Route::post('/api/chat/{roomId}/typing', [ChatController::class, 'typing'])->name('api.message.typing');
+    Route::post('/api/chat/{roomId}/typing', [ChatController::class, 'typing'])->middleware('throttle:120,1')->name('api.message.typing');
     Route::get('/api/chat/{roomId}/archived', [ChatController::class, 'archivedMessages'])->name('api.message.archived');
     Route::post('/api/chat/{roomId}/stay-connected', [ChatController::class, 'triggerStayConnected'])->name('api.stay.trigger');
     Route::get('/api/stay-connected/pending', [ChatController::class, 'pendingStayConnected'])->name('api.stay.pending');
 
     // Rooms API
-    Route::post('/api/rooms', [RoomController::class, 'store'])->name('api.room.store');
+    Route::post('/api/rooms', [RoomController::class, 'store'])->middleware('throttle:10,10')->name('api.room.store');
     Route::delete('/api/rooms/{roomId}', [RoomController::class, 'destroy'])->name('api.room.destroy');
     Route::get('/api/rooms/{roomId}/frame', [ChatController::class, 'roomFrame'])->name('api.room.frame');
     Route::get('/api/users', [RoomController::class, 'getUsers'])->name('api.users');
 
     // Presence
-    Route::post('/api/presence', [ChatController::class, 'updatePresence'])->name('api.presence.update');
+    Route::post('/api/presence', [ChatController::class, 'updatePresence'])->middleware('throttle:120,1')->name('api.presence.update');
     Route::get('/api/presence', [ChatController::class, 'getPresence'])->name('api.presence.get');
 
     // Unread counts
     Route::get('/api/unread', [ChatController::class, 'unreadCounts'])->name('api.unread');
 
     // Profile
-    Route::post('/api/profile/avatar', [ProfileController::class, 'uploadAvatar'])->name('api.profile.avatar');
+    Route::post('/api/profile/avatar', [ProfileController::class, 'uploadAvatar'])->middleware('throttle:10,10')->name('api.profile.avatar');
     Route::post('/api/profile/notifications', [ProfileController::class, 'toggleNotifications'])->name('api.profile.notifications');
 
     // Music (slash-command driven)
     Route::get('/api/music/{roomId}', [MusicController::class, 'getState'])->name('api.music.state');
-    Route::post('/api/music/{roomId}/command', [MusicController::class, 'handleCommand'])->name('api.music.command');
+    Route::post('/api/music/{roomId}/command', [MusicController::class, 'handleCommand'])->middleware('throttle:20,1')->name('api.music.command');
 
     // Voice
-    Route::post('/api/voice/{roomId}/join', [VoiceController::class, 'join'])->name('api.voice.join');
-    Route::post('/api/voice/{roomId}/leave', [VoiceController::class, 'leave'])->name('api.voice.leave');
-    Route::post('/api/voice/{roomId}/mute', [VoiceController::class, 'toggleMute'])->name('api.voice.mute');
-    Route::post('/api/voice/{roomId}/deafen', [VoiceController::class, 'toggleDeafen'])->name('api.voice.deafen');
-    Route::post('/api/voice/{roomId}/speaking', [VoiceController::class, 'speaking'])->name('api.voice.speaking');
-    Route::post('/api/voice/{roomId}/quality', [VoiceController::class, 'quality'])->name('api.voice.quality');
+    Route::post('/api/voice/{roomId}/join', [VoiceController::class, 'join'])->middleware('throttle:20,1')->name('api.voice.join');
+    Route::post('/api/voice/{roomId}/leave', [VoiceController::class, 'leave'])->middleware('throttle:60,1')->name('api.voice.leave');
+    Route::post('/api/voice/{roomId}/mute', [VoiceController::class, 'toggleMute'])->middleware('throttle:60,1')->name('api.voice.mute');
+    Route::post('/api/voice/{roomId}/deafen', [VoiceController::class, 'toggleDeafen'])->middleware('throttle:60,1')->name('api.voice.deafen');
+    Route::post('/api/voice/{roomId}/speaking', [VoiceController::class, 'speaking'])->middleware('throttle:180,1')->name('api.voice.speaking');
+    Route::post('/api/voice/{roomId}/quality', [VoiceController::class, 'quality'])->middleware('throttle:60,1')->name('api.voice.quality');
     Route::get('/api/voice/{roomId}/state', [VoiceController::class, 'state'])->name('api.voice.state');
     Route::post('/api/voice/{roomId}/mute-all', [VoiceController::class, 'muteAll'])->name('api.voice.mute_all');
     Route::delete('/api/voice/{roomId}/participants/{userId}', [VoiceController::class, 'kick'])->name('api.voice.kick');
     Route::post('/api/voice/{roomId}/participants/{userId}/speak', [VoiceController::class, 'setSpeakPermission'])->name('api.voice.speak_permission');
     Route::post('/api/voice/{roomId}/settings', [VoiceController::class, 'settings'])->name('api.voice.settings');
+
+    Route::prefix('rooms/{room}')->name('rooms.')->group(function () {
+        Route::get('/games/current', [GameController::class, 'current'])->name('games.current');
+        Route::post('/games/start', [GameController::class, 'start'])->middleware('throttle:30,1')->name('games.start');
+        Route::get('/games/{gameSession}', [GameController::class, 'show'])->name('games.show');
+        Route::get('/games/{gameSession}/state', [GameController::class, 'state'])->name('games.state');
+        Route::post('/games/{gameSession}/join', [GameController::class, 'join'])->middleware('throttle:30,1')->name('games.join');
+        Route::post('/games/{gameSession}/leave', [GameController::class, 'leave'])->middleware('throttle:30,1')->name('games.leave');
+        Route::post('/games/{gameSession}/ready', [GameController::class, 'ready'])->middleware('throttle:60,1')->name('games.ready');
+        Route::post('/games/{gameSession}/settings', [GameController::class, 'settings'])->middleware('throttle:20,1')->name('games.settings');
+        Route::post('/games/{gameSession}/begin-round', [GameController::class, 'beginRound'])->middleware('throttle:20,1')->name('games.begin_round');
+        Route::post('/games/{gameSession}/rounds/{round}/draft', [GameController::class, 'saveDraft'])->middleware('throttle:120,1')->name('games.rounds.draft');
+        Route::post('/games/{gameSession}/rounds/{round}/submit', [GameController::class, 'submit'])->middleware('throttle:30,1')->name('games.rounds.submit');
+        Route::post('/games/{gameSession}/rounds/{round}/finalize', [GameController::class, 'finalizeRound'])->middleware('throttle:20,1')->name('games.rounds.finalize');
+        Route::post('/games/{gameSession}/finish', [GameController::class, 'finish'])->middleware('throttle:30,1')->name('games.finish');
+    });
 
     // Admin
     Route::middleware('admin')->prefix('admin')->group(function () {

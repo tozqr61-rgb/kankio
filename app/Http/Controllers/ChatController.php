@@ -7,6 +7,7 @@ use App\Events\StayConnectedSurpriseTriggered;
 use App\Events\UserTyping;
 use App\Models\Message;
 use App\Models\Room;
+use App\Services\RoomAccessService;
 use App\Support\AppMetrics;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -14,6 +15,10 @@ use Illuminate\Support\Facades\Log;
 
 class ChatController extends Controller
 {
+    public function __construct(private RoomAccessService $roomAccess)
+    {
+    }
+
     public function index()
     {
         $user = Auth::user();
@@ -39,12 +44,8 @@ class ChatController extends Controller
         $user = Auth::user();
         $room = Room::findOrFail($roomId);
 
-        // Access check for private rooms
-        if ($room->type === 'private') {
-            $isMember = $room->members()->where('user_id', $user->id)->exists();
-            if (! $isMember && ! $user->isAdmin()) {
-                abort(403, 'Bu odaya erişim izniniz yok.');
-            }
+        if (! $this->roomAccess->canAccessRoom($room, $user)) {
+            abort(403, 'Bu odaya erişim izniniz yok.');
         }
 
         $messages = Message::where('room_id', $roomId)
@@ -78,7 +79,7 @@ class ChatController extends Controller
         $user = Auth::user();
         $room = Room::findOrFail($roomId);
 
-        if (! $this->canAccessRoom($room, $user)) {
+        if (! $this->roomAccess->canAccessRoom($room, $user)) {
             return response()->json(['error' => 'Erişim reddedildi'], 403);
         }
 
@@ -118,7 +119,7 @@ class ChatController extends Controller
         $user = Auth::user();
         $room = Room::findOrFail($roomId);
 
-        if (! $this->canAccessRoom($room, $user)) {
+        if (! $this->roomAccess->canAccessRoom($room, $user)) {
             return response()->json(['error' => 'Erişim reddedildi'], 403);
         }
 
@@ -154,7 +155,7 @@ class ChatController extends Controller
         $user = Auth::user();
         $room = Room::findOrFail($roomId);
 
-        if (! $this->canAccessRoom($room, $user)) {
+        if (! $this->roomAccess->canAccessRoom($room, $user)) {
             return response()->json(['error' => 'Erişim reddedildi'], 403);
         }
 
@@ -184,6 +185,12 @@ class ChatController extends Controller
 
     private function getAccessibleRooms($user)
     {
+        if ($user->isAdmin()) {
+            return Room::where('type', '!=', 'dm')
+                ->orderBy('created_at', 'asc')
+                ->get();
+        }
+
         return Room::where('type', '!=', 'dm')
             ->where(function ($q) use ($user) {
                 $q->where('type', 'global')
@@ -195,15 +202,6 @@ class ChatController extends Controller
             })
             ->orderBy('created_at', 'asc')
             ->get();
-    }
-
-    private function canAccessRoom($room, $user): bool
-    {
-        if ($room->type !== 'private') {
-            return true;
-        }
-
-        return $user->isAdmin() || $room->members()->where('user_id', $user->id)->exists();
     }
 
     private function getOnlineUsers(): array
@@ -313,7 +311,7 @@ class ChatController extends Controller
         $user = Auth::user();
         $room = Room::findOrFail($roomId);
 
-        if (! $this->canAccessRoom($room, $user)) {
+        if (! $this->roomAccess->canAccessRoom($room, $user)) {
             return response()->json(['error' => 'Erişim reddedildi'], 403);
         }
 
@@ -336,7 +334,7 @@ class ChatController extends Controller
         $user = Auth::user();
         $room = Room::findOrFail($roomId);
 
-        if (! $this->canAccessRoom($room, $user)) {
+        if (! $this->roomAccess->canAccessRoom($room, $user)) {
             return response()->json(['error' => 'Erişim reddedildi'], 403);
         }
 
@@ -383,7 +381,7 @@ class ChatController extends Controller
         $user = Auth::user();
         $room = Room::findOrFail($roomId);
 
-        if (! $this->canAccessRoom($room, $user)) {
+        if (! $this->roomAccess->canAccessRoom($room, $user)) {
             return response()->json(['error' => 'Erişim reddedildi'], 403);
         }
 
@@ -413,7 +411,7 @@ class ChatController extends Controller
         $user = Auth::user();
         $room = Room::findOrFail($roomId);
 
-        if (! $this->canAccessRoom($room, $user)) {
+        if (! $this->roomAccess->canAccessRoom($room, $user)) {
             return response()->json(['error' => 'Erişim reddedildi'], 403);
         }
 

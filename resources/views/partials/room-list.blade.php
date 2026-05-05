@@ -50,7 +50,7 @@
         <div class="space-y-2">
             <div class="px-2 text-[10px] font-medium tracking-[0.2em] uppercase" style="color:rgba(255,255,255,0.18)">Odalar</div>
             <div class="space-y-1">
-                @foreach($rooms as $room)
+                @foreach(($rooms ?? collect()) as $room)
                 <div class="block group relative">
                     <a href="{{ route('chat.room', $room->id) }}"
                        @click.prevent="isMobile && (leftOpen = false); window._changeRoom && window._changeRoom('{{ $room->id }}', '{{ addslashes($room->name) }}')"
@@ -102,11 +102,11 @@
         </div>
 
         <!-- DMs -->
-        @if(count($dms) > 0)
+        @if(count($dms ?? []) > 0)
         <div class="space-y-2">
             <div class="px-2 text-[10px] font-medium tracking-[0.2em] uppercase" style="color:rgba(255,255,255,0.18)">Mesajlar</div>
             <div class="space-y-1">
-                @foreach($dms as $dm)
+                @foreach(($dms ?? collect()) as $dm)
                 <a href="{{ route('chat.room', $dm->id) }}"
                    @click.prevent="window._changeRoom && window._changeRoom('{{ $dm->id }}')"
                    class="relative w-full flex items-center px-4 py-3 text-sm font-light rounded-xl transition-all duration-300
@@ -229,7 +229,7 @@ function roomListComp() {
         isActiveUsersOpen: true,
         _unreadTimer: null,
         _echo: null,
-        _roomIds: @json($rooms->pluck('id')->merge($dms->pluck('id'))->unique()->values()),
+        _roomIds: @json(($rooms ?? collect())->pluck('id')->merge(($dms ?? collect())->pluck('id'))->unique()->values()),
 
         get onlineUsers() {
             return (typeof Alpine !== 'undefined' && Alpine.store('chat')) ? Alpine.store('chat').onlineUsers : [];
@@ -276,26 +276,28 @@ function roomListComp() {
 
         _initRealtimeUnread() {
             try {
-                if (!window.LaravelEcho || typeof BROADCAST_DRIVER === 'undefined' || BROADCAST_DRIVER === 'null') return false;
+                const driver = window.KANKIO_BROADCAST_DRIVER || 'null';
+                const config = window.KANKIO_BROADCAST_CONFIG || {};
+                if (!window.LaravelEcho || driver === 'null' || driver === 'log') return false;
 
                 if (window.KANKIO_ECHO) {
                     this._echo = window.KANKIO_ECHO;
                 } else {
-                    const cfg = BROADCAST_DRIVER === 'pusher'
+                    const cfg = driver === 'pusher'
                         ? {
                             broadcaster: 'pusher',
-                            key: BROADCAST_CONFIG.pusher.key,
-                            cluster: BROADCAST_CONFIG.pusher.cluster,
-                            forceTLS: BROADCAST_CONFIG.pusher.scheme === 'https',
+                            key: config.pusher?.key,
+                            cluster: config.pusher?.cluster,
+                            forceTLS: config.pusher?.scheme === 'https',
                             disableStats: true,
                         }
                         : {
                             broadcaster: 'reverb',
-                            key: BROADCAST_CONFIG.reverb.key,
-                            wsHost: BROADCAST_CONFIG.reverb.host,
-                            wsPort: BROADCAST_CONFIG.reverb.port,
-                            wssPort: BROADCAST_CONFIG.reverb.port,
-                            forceTLS: BROADCAST_CONFIG.reverb.scheme === 'https',
+                            key: config.reverb?.key,
+                            wsHost: config.reverb?.host,
+                            wsPort: config.reverb?.port,
+                            wssPort: config.reverb?.port,
+                            forceTLS: config.reverb?.scheme === 'https',
                             disableStats: true,
                             enabledTransports: ['ws'],
                         };

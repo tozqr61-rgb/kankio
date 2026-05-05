@@ -6,6 +6,7 @@ use App\Events\MessageDeleted;
 use App\Events\MessageSent;
 use App\Models\Message;
 use App\Models\Room;
+use App\Services\RoomAccessService;
 use App\Support\AppMetrics;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -13,6 +14,10 @@ use Illuminate\Support\Facades\Log;
 
 class MessageController extends Controller
 {
+    public function __construct(private RoomAccessService $roomAccess)
+    {
+    }
+
     public function store(Request $request, $roomId)
     {
         $user = Auth::user();
@@ -23,12 +28,8 @@ class MessageController extends Controller
             return response()->json(['error' => 'Bu odaya yalnızca yöneticiler yazabilir'], 403);
         }
 
-        // Private room access check
-        if ($room->type === 'private') {
-            $isMember = $room->members()->where('user_id', $user->id)->exists();
-            if (! $isMember && ! $user->isAdmin()) {
-                return response()->json(['error' => 'Erişim reddedildi'], 403);
-            }
+        if (! $this->roomAccess->canAccessRoom($room, $user)) {
+            return response()->json(['error' => 'Erişim reddedildi'], 403);
         }
 
         $isVoiceMessage = $request->hasFile('audio');
@@ -96,6 +97,11 @@ class MessageController extends Controller
     {
         $user = Auth::user();
         $message = Message::where('room_id', $roomId)->findOrFail($messageId);
+        $room = Room::findOrFail($roomId);
+
+        if (! $this->roomAccess->canAccessRoom($room, $user)) {
+            return response()->json(['error' => 'Erişim reddedildi'], 403);
+        }
 
         if (! $user->isAdmin() && $message->sender_id !== $user->id) {
             return response()->json(['error' => 'Erişim reddedildi'], 403);

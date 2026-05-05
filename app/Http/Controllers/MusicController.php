@@ -6,11 +6,15 @@ use App\Events\MessageSent;
 use App\Events\MusicStateChanged;
 use App\Events\VoiceStateChanged;
 use App\Models\Message;
+use App\Models\Room;
 use App\Models\RoomMusicState;
+use App\Services\RoomAccessService;
 use App\Support\AppMetrics;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class MusicController extends Controller
@@ -19,10 +23,19 @@ class MusicController extends Controller
 
     private const DJ_BOT_USERNAME = '🎵 DJ Bot';
 
+    public function __construct(private RoomAccessService $roomAccess)
+    {
+    }
+
     /** Return current music state (with live-computed position).
      *  Also auto-advances track if it has ended. */
     public function getState($roomId)
     {
+        $room = Room::findOrFail($roomId);
+        if (! $this->roomAccess->canAccessRoom($room, Auth::user())) {
+            return response()->json(['error' => 'Erişim reddedildi'], 403);
+        }
+
         $state = RoomMusicState::firstOrCreate(
             ['room_id' => $roomId],
             ['queue' => []]
@@ -57,6 +70,11 @@ class MusicController extends Controller
         $request->validate(['command' => 'required|string|max:500']);
         $raw = trim($request->command);
         $user = Auth::user();
+        $room = Room::findOrFail($roomId);
+
+        if (! $this->roomAccess->canAccessRoom($room, $user)) {
+            return response()->json(['error' => 'Erişim reddedildi'], 403);
+        }
 
         /* Check user is in voice chat */
         $inVoice = DB::table('voice_sessions')
@@ -354,53 +372,54 @@ class MusicController extends Controller
 
     private function searchYouTube(string $query): ?string
     {
-        /* Try scraping YouTube search results page (no API key needed) */
-        try {
-            $url = 'https://www.youtube.com/results?search_query='.urlencode($query);
-            $ctx = stream_context_create([
-                'http' => [
-                    'timeout' => 5,
-                    'ignore_errors' => true,
-                    'header' => "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\nAccept-Language: en-US,en;q=0.9\r\n",
-                ],
-            ]);
-            $html = @file_get_contents($url, false, $ctx);
-            if ($html && preg_match('/\/watch\?v=([\w-]{11})/', $html, $m)) {
-                return $m[1];
-            }
-        } catch (\Exception $e) {
-            Log::warning('music.youtube.scrape_failed', [
-                'query' => $query,
-                'error' => $e->getMessage(),
-            ]);
-            AppMetrics::increment('external_service_errors_total', ['service' => 'youtube', 'reason' => 'scrape_failed']);
-        }
+        return Cache::remember('music.youtube.search.'.sha1($query), now()->addHours(6), function () use ($query) {
+            $apiKey = config('services.youtube.key', '');
+            if ($apiKey) {
+                try {
+                    $response = Http::timeout(5)
+                        ->retry(2, 200)
+                        ->get('https://www.googleapis.com/youtube/v3/search', [
+                            'part' => 'snippet',
+                            'type' => 'video',
+                            'maxResults' => 1,
+                            'videoEmbeddable' => 'true',
+                            'q' => $query,
+                            'key' => $apiKey,
+                        ]);
 
-        /* Fallback: YouTube Data API if key is configured */
-        $apiKey = config('services.youtube.key', env('YOUTUBE_API_KEY', ''));
-        if ($apiKey) {
-            try {
-                $url = 'https://www.googleapis.com/youtube/v3/search?part=snippet'
-                    .'&type=video&maxResults=1&videoEmbeddable=true'
-                    .'&q='.urlencode($query)
-                    .'&key='.urlencode($apiKey);
-                $ctx = stream_context_create(['http' => ['timeout' => 5, 'ignore_errors' => true]]);
-                $json = @file_get_contents($url, false, $ctx);
-                if ($json) {
-                    $data = json_decode($json, true);
-
-                    return $data['items'][0]['id']['videoId'] ?? null;
+                    if ($response->ok()) {
+                        return $response->json('items.0.id.videoId');
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('music.youtube.search_api_failed', [
+                        'query' => $query,
+                        'error' => $e->getMessage(),
+                    ]);
+                    AppMetrics::increment('external_service_errors_total', ['service' => 'youtube', 'reason' => 'search_api_failed']);
                 }
-            } catch (\Exception $e) {
-                Log::warning('music.youtube.search_api_failed', [
+            }
+
+            try {
+                $response = Http::timeout(5)
+                    ->withHeaders([
+                        'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        'Accept-Language' => 'en-US,en;q=0.9',
+                    ])
+                    ->get('https://www.youtube.com/results', ['search_query' => $query]);
+
+                if ($response->ok() && preg_match('/\/watch\?v=([\w-]{11})/', $response->body(), $m)) {
+                    return $m[1];
+                }
+            } catch (\Throwable $e) {
+                Log::warning('music.youtube.scrape_failed', [
                     'query' => $query,
                     'error' => $e->getMessage(),
                 ]);
-                AppMetrics::increment('external_service_errors_total', ['service' => 'youtube', 'reason' => 'search_api_failed']);
+                AppMetrics::increment('external_service_errors_total', ['service' => 'youtube', 'reason' => 'scrape_failed']);
             }
-        }
 
-        return null;
+            return null;
+        });
     }
 
     private function queuePosition(array $queue, string $videoId): int
@@ -449,55 +468,62 @@ class MusicController extends Controller
 
     private function getVideoTitle(string $videoId): string
     {
-        try {
-            $url = 'https://www.youtube.com/oembed?url='.urlencode('https://www.youtube.com/watch?v='.$videoId).'&format=json';
-            $ctx = stream_context_create(['http' => ['timeout' => 4, 'ignore_errors' => true]]);
-            $json = @file_get_contents($url, false, $ctx);
-            if ($json) {
-                $data = json_decode($json, true);
-                if (! empty($data['title'])) {
-                    return $data['title'];
-                }
-            }
-        } catch (\Exception $e) {
-            Log::warning('music.youtube.oembed_failed', [
-                'video_id' => $videoId,
-                'error' => $e->getMessage(),
-            ]);
-            AppMetrics::increment('external_service_errors_total', ['service' => 'youtube', 'reason' => 'oembed_failed']);
-        }
+        return Cache::remember("music.youtube.title.{$videoId}", now()->addDay(), function () use ($videoId) {
+            try {
+                $response = Http::timeout(4)
+                    ->retry(2, 200)
+                    ->get('https://www.youtube.com/oembed', [
+                        'url' => 'https://www.youtube.com/watch?v='.$videoId,
+                        'format' => 'json',
+                    ]);
 
-        return $videoId;
+                if ($response->ok() && $response->json('title')) {
+                    return $response->json('title');
+                }
+            } catch (\Throwable $e) {
+                Log::warning('music.youtube.oembed_failed', [
+                    'video_id' => $videoId,
+                    'error' => $e->getMessage(),
+                ]);
+                AppMetrics::increment('external_service_errors_total', ['service' => 'youtube', 'reason' => 'oembed_failed']);
+            }
+
+            return $videoId;
+        });
     }
 
     /** Fetch video duration in seconds from YouTube Data API. Returns 0 on failure. */
     private function getVideoDuration(string $videoId): float
     {
-        try {
-            $apiKey = config('services.youtube.key', env('YOUTUBE_API_KEY', ''));
+        return Cache::remember("music.youtube.duration.{$videoId}", now()->addDay(), function () use ($videoId) {
+            $apiKey = config('services.youtube.key', '');
             if (! $apiKey) {
                 return 0;
             }
-            $url = 'https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id='
-                .urlencode($videoId).'&key='.urlencode($apiKey);
-            $ctx = stream_context_create(['http' => ['timeout' => 5, 'ignore_errors' => true]]);
-            $json = @file_get_contents($url, false, $ctx);
-            if ($json) {
-                $data = json_decode($json, true);
-                $iso = $data['items'][0]['contentDetails']['duration'] ?? null;
+
+            try {
+                $response = Http::timeout(5)
+                    ->retry(2, 200)
+                    ->get('https://www.googleapis.com/youtube/v3/videos', [
+                        'part' => 'contentDetails',
+                        'id' => $videoId,
+                        'key' => $apiKey,
+                    ]);
+
+                $iso = $response->ok() ? $response->json('items.0.contentDetails.duration') : null;
                 if ($iso) {
                     return (float) $this->iso8601ToSeconds($iso);
                 }
+            } catch (\Throwable $e) {
+                Log::warning('music.youtube.duration_failed', [
+                    'video_id' => $videoId,
+                    'error' => $e->getMessage(),
+                ]);
+                AppMetrics::increment('external_service_errors_total', ['service' => 'youtube', 'reason' => 'duration_failed']);
             }
-        } catch (\Exception $e) {
-            Log::warning('music.youtube.duration_failed', [
-                'video_id' => $videoId,
-                'error' => $e->getMessage(),
-            ]);
-            AppMetrics::increment('external_service_errors_total', ['service' => 'youtube', 'reason' => 'duration_failed']);
-        }
 
-        return 0;
+            return 0;
+        });
     }
 
     /** Convert ISO 8601 duration (PT4M13S) to seconds. */

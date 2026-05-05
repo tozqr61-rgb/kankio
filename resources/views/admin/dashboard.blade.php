@@ -122,6 +122,9 @@
                 <div class="flex-1 min-w-0">
                     <p class="font-medium mb-0.5">Aktif Sürüm: v{{ $latestApp->version }}</p>
                     <p class="opacity-80 break-words text-xs">Drive: {{ $latestApp->drive_link }}</p>
+                    @if($latestApp->checksum)
+                        <p class="opacity-80 break-words text-xs">SHA-256: {{ $latestApp->checksum }}</p>
+                    @endif
                 </div>
             </div>
             @endif
@@ -132,6 +135,10 @@
                     style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:#fff">
 
                 <input type="url" x-model="app.drive_link" placeholder="Google Drive Linki (https://drive.google.com/file/d/.../view)"
+                    class="w-full rounded-xl px-3 py-2 text-sm outline-none placeholder-zinc-600"
+                    style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:#fff">
+
+                <input type="text" x-model="app.checksum" placeholder="SHA-256 checksum (opsiyonel)"
                     class="w-full rounded-xl px-3 py-2 text-sm outline-none placeholder-zinc-600"
                     style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:#fff">
 
@@ -190,7 +197,7 @@ function adminDashboard() {
     return {
         cleaningOld: false, cleaningAll: false,
         ann: { message: '', type: 'info', expires_at: '', sending: false },
-        app: { version: '', drive_link: '', notes: '', sending: false },
+        app: { version: '', drive_link: '', checksum: '', notes: '', sending: false },
         maintenance: {{ \Illuminate\Support\Facades\Cache::get('maintenance_mode', false) ? 'true' : 'false' }},
 
         async toggleMaintenance() {
@@ -209,7 +216,7 @@ function adminDashboard() {
             const r = await fetch(`/admin/app-release`, {
                 method: 'POST',
                 headers: { 'X-CSRF-TOKEN': CSRF, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ version: this.app.version, drive_link: this.app.drive_link, notes: this.app.notes }),
+                body: JSON.stringify({ version: this.app.version, drive_link: this.app.drive_link, checksum: this.app.checksum, notes: this.app.notes }),
             });
             this.app.sending = false;
             if (r.ok) { showToast('Uygulama başarıyla güncellendi'); location.reload(); }

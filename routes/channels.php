@@ -59,6 +59,10 @@ Broadcast::channel('room.{roomId}.music', function ($user, $roomId) {
     return canAccessBroadcastRoom($user, (int) $roomId);
 });
 
+Broadcast::channel('room.{roomId}.game', function ($user, $roomId) {
+    return canAccessBroadcastRoom($user, (int) $roomId);
+});
+
 /* ── Music control: only room owner or admin can change track ── */
 Broadcast::channel('room.{roomId}.music.control', function ($user, $roomId) {
     $room = DB::table('rooms')->where('id', $roomId)->first();

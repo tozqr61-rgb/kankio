@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 class BaglantiKalController extends Controller
@@ -20,7 +21,9 @@ class BaglantiKalController extends Controller
         return view('pages.stay-connected', [
             'isAdmin' => auth()->check() && auth()->user()->isAdmin(),
             'embedded' => $request->boolean('embedded'),
-            'initialContent' => Arr::except($this->getContent(), ['mektup']),
+            'initialContent' => auth()->check() && auth()->user()->isAdmin()
+                ? Arr::except($this->getContent(), ['mektup'])
+                : [],
         ]);
     }
 
@@ -82,12 +85,18 @@ class BaglantiKalController extends Controller
             'mektup.p4'           => 'string|max:200',
         ]);
 
-        $written = file_put_contents(
-            $this->jsonPath,
-            json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)
-        );
+        $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
+        $dir = dirname($this->jsonPath);
+        if (! is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        $tmpPath = $this->jsonPath.'.tmp.'.bin2hex(random_bytes(6));
+        $written = file_put_contents($tmpPath, $json, LOCK_EX);
 
-        if ($written === false) {
+        if ($written === false || ! rename($tmpPath, $this->jsonPath)) {
+            if (file_exists($tmpPath)) {
+                @unlink($tmpPath);
+            }
             return response()->json(['message' => 'İçerik dosyası yazılamadı.'], 500);
         }
 
@@ -123,7 +132,14 @@ class BaglantiKalController extends Controller
     {
         if (file_exists($this->jsonPath)) {
             $decoded = json_decode(file_get_contents($this->jsonPath), true);
-            if ($decoded) return $decoded;
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                return $decoded;
+            }
+
+            Log::warning('baglantikal.content_json_corrupt', [
+                'path' => $this->jsonPath,
+                'json_error' => json_last_error_msg(),
+            ]);
         }
         return $this->defaultContent();
     }

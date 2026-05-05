@@ -50,4 +50,8 @@ return [
         'letter_pin' => env('BAGLANTIKAL_LETTER_PIN'),
     ],
 
+    'app_release' => [
+        'allowed_hosts' => env('APP_RELEASE_ALLOWED_HOSTS', 'drive.google.com,github.com,githubusercontent.com'),
+    ],
+
 ];

@@ -147,10 +147,21 @@ fn allow_media_permissions(app: &mut tauri::App) {
             use webkit2gtk::prelude::*;
             use webkit2gtk::PermissionRequestExt;
             if let Some(wk) = webview.inner().dynamic_cast_ref::<webkit2gtk::WebView>() {
-                wk.connect_permission_requested(|_, request| {
+                wk.connect_permission_requested(|webview, request| {
                     if request.is::<webkit2gtk::UserMediaPermissionRequest>() {
-                        request.allow();
-                        return glib::signal::Inhibit(true);
+                        let allowed = webview
+                            .uri()
+                            .map(|uri| {
+                                uri.starts_with("https://kank.com.tr/chat")
+                                    || uri.starts_with("http://127.0.0.1:8000/chat")
+                                    || uri.starts_with("http://localhost:8000/chat")
+                            })
+                            .unwrap_or(false);
+
+                        if allowed {
+                            request.allow();
+                            return glib::signal::Inhibit(true);
+                        }
                     }
                     glib::signal::Inhibit(false)
                 });

@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class AppRelease extends Model
 {
-    protected $fillable = ['version', 'notes', 'drive_link'];
+    protected $fillable = ['version', 'notes', 'drive_link', 'checksum'];
 
     /**
      * Otomatik olarak Google Drive linkini doğrudan indirme (direct download) linkine çevirir.

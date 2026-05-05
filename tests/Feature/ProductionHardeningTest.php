@@ -5,7 +5,11 @@ namespace Tests\Feature;
 use App\Events\MessageSent;
 use App\Events\MessagesRead;
 use App\Events\UserTyping;
+use App\Models\AdminAction;
+use App\Models\AppRelease;
+use App\Models\InviteCode;
 use App\Models\Message;
+use App\Models\RoomMusicState;
 use App\Models\Room;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -298,7 +302,10 @@ class ProductionHardeningTest extends TestCase
             'services.baglantikal.letter_pin' => '2022',
         ]);
 
-        $this->get(route('stay.connected'))->assertOk();
+        $this->get(route('stay.connected'))
+            ->assertOk()
+            ->assertDontSee('Sabahlara Kadar Uyumayanlar')
+            ->assertDontSee('Bu mektubu açabilmek');
 
         $this->postJson(route('stay.unlock'), ['pin' => '0000'])
             ->assertStatus(422);
@@ -355,5 +362,124 @@ class ProductionHardeningTest extends TestCase
             ])
             ->assertOk()
             ->assertJsonStructure(['audio_url']);
+    }
+
+    public function test_should_apply_auth_rate_limit_middleware(): void
+    {
+        $loginRoute = app('router')->getRoutes()->getByName('login.post');
+        $registerRoute = app('router')->getRoutes()->getByName('register.post');
+
+        $this->assertContains('throttle:5,1', $loginRoute->gatherMiddleware());
+        $this->assertContains('throttle:5,5', $registerRoute->gatherMiddleware());
+    }
+
+    public function test_should_block_private_room_music_state_for_outsider(): void
+    {
+        $owner = User::factory()->create();
+        $member = User::factory()->create();
+        $outsider = User::factory()->create();
+        $room = Room::create(['name' => 'Private Music', 'type' => 'private', 'created_by' => $owner->id]);
+        $room->members()->attach($member->id, ['role' => 'member']);
+
+        RoomMusicState::create([
+            'room_id' => $room->id,
+            'video_id' => 'dQw4w9WgXcQ',
+            'video_title' => 'Private song',
+            'queue' => [],
+        ]);
+
+        $this->actingAs($outsider)
+            ->getJson(route('api.music.state', $room->id))
+            ->assertForbidden();
+
+        $this->actingAs($member)
+            ->getJson(route('api.music.state', $room->id))
+            ->assertOk()
+            ->assertJsonPath('video_title', 'Private song');
+    }
+
+    public function test_should_restrict_global_room_creation_to_admins_but_allow_private_rooms(): void
+    {
+        $user = User::factory()->create();
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        $this->actingAs($user)
+            ->postJson(route('api.room.store'), ['name' => 'Nope', 'type' => 'global'])
+            ->assertForbidden();
+
+        $this->actingAs($user)
+            ->postJson(route('api.room.store'), ['name' => 'Private ok', 'type' => 'private'])
+            ->assertCreated();
+
+        $this->actingAs($admin)
+            ->postJson(route('api.room.store'), ['name' => 'Global ok', 'type' => 'global'])
+            ->assertCreated();
+    }
+
+    public function test_should_record_admin_audit_for_destructive_actions(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $target = User::factory()->create();
+
+        $this->actingAs($admin)
+            ->deleteJson(route('admin.user.delete', $target->id))
+            ->assertOk();
+
+        $this->assertDatabaseHas('admin_actions', [
+            'actor_id' => $admin->id,
+            'action' => 'user.delete',
+            'target_type' => User::class,
+            'target_id' => (string) $target->id,
+        ]);
+    }
+
+    public function test_should_validate_app_release_host_and_checksum(): void
+    {
+        config(['services.app_release.allowed_hosts' => 'drive.google.com']);
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        $this->actingAs($admin)
+            ->postJson(route('admin.app_release.post'), [
+                'version' => '1.2.3',
+                'drive_link' => 'https://example.com/kankio.apk',
+                'checksum' => str_repeat('a', 64),
+            ])
+            ->assertStatus(422);
+
+        $this->actingAs($admin)
+            ->postJson(route('admin.app_release.post'), [
+                'version' => '1.2.3',
+                'drive_link' => 'https://drive.google.com/file/d/abc/view',
+                'checksum' => str_repeat('b', 64),
+            ])
+            ->assertOk();
+
+        $this->assertDatabaseHas('app_releases', [
+            'version' => '1.2.3',
+            'checksum' => str_repeat('b', 64),
+        ]);
+    }
+
+    public function test_should_consume_invite_atomically_on_register(): void
+    {
+        $invite = InviteCode::create(['code' => 'KNK-'.strtoupper(bin2hex(random_bytes(5)))]);
+        $room = Room::create(['name' => 'Global', 'type' => 'global']);
+
+        $response = $this->post(route('register.post'), [
+            'username' => 'newuser',
+            'password' => 'secret123',
+            'password_confirmation' => 'secret123',
+            'invite_code' => $invite->code,
+        ]);
+
+        $response->assertRedirect(route('chat.index'));
+        $this->assertDatabaseHas('invite_codes', [
+            'id' => $invite->id,
+            'is_used' => true,
+        ]);
+        $this->assertDatabaseHas('room_members', [
+            'room_id' => $room->id,
+            'role' => 'member',
+        ]);
     }
 }

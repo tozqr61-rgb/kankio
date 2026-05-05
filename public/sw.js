@@ -21,6 +21,15 @@ const BYPASS_PATTERNS = [
     /\?wsa=/,                           /* WebSocket upgrade   */
 ];
 
+const SENSITIVE_HTML_PATHS = [
+    /^\/chat(?:\/|$)/,
+    /^\/rooms(?:\/|$)/,
+    /^\/admin(?:\/|$)/,
+    /^\/baglantikal(?:\/|$)/,
+    /^\/login(?:\/|$)/,
+    /^\/register(?:\/|$)/,
+];
+
 /* ── CDN and static asset patterns → Cache First ── */
 const STATIC_PATTERNS = [
     /cdn\.tailwindcss\.com/,
@@ -46,6 +55,16 @@ const isSWR = url => SWR_PATTERNS.some(p => p.test(url));
 /* ── Helpers ── */
 const isBypassed = url => BYPASS_PATTERNS.some(p => p.test(url));
 const isStatic   = url => STATIC_PATTERNS.some(p => p.test(url));
+const isSensitiveHtml = request => {
+    try {
+        const url = new URL(request.url);
+        return request.headers.get('accept')?.includes('text/html')
+            && url.origin === self.location.origin
+            && SENSITIVE_HTML_PATHS.some(p => p.test(url.pathname));
+    } catch {
+        return false;
+    }
+};
 
 /* ────────────────────────────────────────────
  * INSTALL — pre-cache the offline fallback
@@ -85,6 +104,7 @@ self.addEventListener('fetch', event => {
     /* 1 — Pass through non-GET and bypass patterns unchanged */
     if (request.method !== 'GET') return;
     if (isBypassed(url)) return;
+    if (isSensitiveHtml(request)) return;
 
     /* 2a — Stale-While-Revalidate: YouTube thumbnails (immutable per video ID) */
     if (isSWR(url)) {
@@ -116,7 +136,9 @@ async function cacheFirst(request) {
 
     try {
         const response = await fetch(request);
-        if (response.ok) cache.put(request, response.clone());
+        if (response.ok && response.headers.get('Cache-Control') !== 'no-store') {
+            cache.put(request, response.clone());
+        }
         return response;
     } catch {
         return new Response('', { status: 503 });
