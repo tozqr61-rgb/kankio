@@ -213,7 +213,7 @@ class ProductionHardeningTest extends TestCase
     public function test_invisible_presence_hides_online_typing_and_read_receipts(): void
     {
         $sender = User::factory()->create();
-        $reader = User::factory()->create();
+        $reader = User::factory()->create(['role' => 'admin']);
         $room = Room::create(['name' => 'Global', 'type' => 'global', 'created_by' => $sender->id]);
         $message = Message::create([
             'room_id' => $room->id,
@@ -258,6 +258,21 @@ class ProductionHardeningTest extends TestCase
             'message_id' => $message->id,
             'user_id' => $reader->id,
         ]);
+    }
+
+    public function test_invisible_presence_mode_is_admin_only(): void
+    {
+        $user = User::factory()->create();
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        $this->actingAs($user)
+            ->postJson(route('api.profile.presence_mode'), ['presence_mode' => 'invisible'])
+            ->assertForbidden();
+
+        $this->actingAs($admin)
+            ->postJson(route('api.profile.presence_mode'), ['presence_mode' => 'invisible'])
+            ->assertOk()
+            ->assertJsonPath('presence_mode', 'invisible');
     }
 
     public function test_should_allow_only_voice_moderators_to_mute_kick_and_change_speak_permission(): void

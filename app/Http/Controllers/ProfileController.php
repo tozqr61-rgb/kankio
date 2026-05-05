@@ -59,6 +59,10 @@ class ProfileController extends Controller
         ]);
 
         $user = Auth::user();
+        if ($data['presence_mode'] === 'invisible' && ! $user->isAdmin()) {
+            return response()->json(['message' => 'Çevrimdışı görünme yalnızca adminler için kullanılabilir.'], 403);
+        }
+
         $user->update(['presence_mode' => $data['presence_mode']]);
 
         if ($data['presence_mode'] === 'invisible') {

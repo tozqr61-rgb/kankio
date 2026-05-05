@@ -6,6 +6,7 @@ use App\Events\MessageDeleted;
 use App\Events\MessageSent;
 use App\Models\Message;
 use App\Models\Room;
+use App\Services\Bots\BotManager;
 use App\Services\RoomAccessService;
 use App\Support\AppMetrics;
 use Illuminate\Http\Request;
@@ -90,6 +91,8 @@ class MessageController extends Controller
             AppMetrics::increment('external_service_errors_total', ['service' => 'reverb', 'reason' => 'message_sent_broadcast']);
         }
 
+        $this->dispatchBotCommandIfNeeded($message, $room, $user);
+
         return response()->json($payload, 201);
     }
 
@@ -157,5 +160,27 @@ class MessageController extends Controller
                 'role' => $message->sender->role,
             ],
         ];
+    }
+
+    private function dispatchBotCommandIfNeeded(Message $message, Room $room, $user): void
+    {
+        if ($user->is_bot) {
+            return;
+        }
+
+        $manager = app(BotManager::class);
+        if (! $manager->isCommand((string) $message->content)) {
+            return;
+        }
+
+        try {
+            $manager->dispatch((string) $message->content, $room, $user);
+        } catch (\Throwable $e) {
+            Log::warning('chat.bot.dispatch_failed', [
+                'room_id' => $room->id,
+                'message_id' => $message->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }

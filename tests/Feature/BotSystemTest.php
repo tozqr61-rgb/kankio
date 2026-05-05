@@ -148,6 +148,27 @@ class BotSystemTest extends TestCase
         $this->assertStringContainsString($this->user->username, $msg->content);
     }
 
+    public function test_slash_command_http_message_creates_bot_response_immediately(): void
+    {
+        Event::fake([MessageSent::class]);
+
+        $this->actingAs($this->user)
+            ->postJson(route('api.message.store', $this->room->id), ['content' => '/oyun durum'])
+            ->assertCreated();
+
+        $this->assertDatabaseHas('messages', [
+            'room_id' => $this->room->id,
+            'sender_id' => $this->user->id,
+            'content' => '/oyun durum',
+        ]);
+        $this->assertDatabaseHas('messages', [
+            'room_id' => $this->room->id,
+            'sender_id' => $this->gameBot->user_id,
+        ]);
+
+        Event::assertDispatched(MessageSent::class, 2);
+    }
+
     public function test_dj_bot_handles_queue_command_with_empty_queue(): void
     {
         Event::fake([MessageSent::class]);

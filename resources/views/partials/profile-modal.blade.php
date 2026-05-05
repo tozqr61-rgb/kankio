@@ -106,6 +106,7 @@
             </button>
 
             <!-- Presence Mode Toggle -->
+            @if(auth()->user()->isAdmin())
             <button @click="togglePresenceMode()"
                 class="w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all"
                 style="border-color:rgba(255,255,255,0.08)"
@@ -130,6 +131,7 @@
             <p class="w-full -mt-3 text-xs leading-relaxed text-zinc-500">
                 Açıkken aktif listesinde görünmezsin; yazıyor ve görüldü bilgilerin gönderilmez.
             </p>
+            @endif
 
             <!-- Upload Button -->
             <button @click="$refs.fileInput.click()" :disabled="uploading"
