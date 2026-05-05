@@ -18,6 +18,7 @@ class User extends Authenticatable
         'role',
         'is_banned',
         'notifications_enabled',
+        'presence_mode',
         'last_seen_at',
         'last_avatar_update',
     ];

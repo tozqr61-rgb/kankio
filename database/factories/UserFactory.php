@@ -30,6 +30,7 @@ class UserFactory extends Factory
             'email'    => $username . '@kank.com',
             'password' => static::$password ??= Hash::make('password'),
             'role'     => 'user',
+            'presence_mode' => 'online',
             'remember_token' => Str::random(10),
         ];
     }

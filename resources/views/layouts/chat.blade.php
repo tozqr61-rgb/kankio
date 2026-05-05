@@ -363,11 +363,13 @@
                         const r = await fetch(`/api/presence`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
-                            body: JSON.stringify({ status: 'online' })
+                            body: JSON.stringify({
+                                status: Alpine.store('chat').currentUser?.presence_mode === 'invisible' ? 'offline' : 'online'
+                            })
                         });
-                        const data = await r.json();
-                        this.onlineUsers = data.users || [];
-                        Alpine.store('chat').onlineUsers = data.users || [];
+	                        const data = await r.json();
+	                        this.onlineUsers = data.users || [];
+	                        Alpine.store('chat').onlineUsers = data.users || [];
                     } catch(e) {}
                 };
 
@@ -379,11 +381,12 @@
                     navigator.sendBeacon(`/api/presence`, body);
                 };
 
-                /* When tab becomes visible again, immediately refresh */
-                document.addEventListener('visibilitychange', () => {
-                    if (!document.hidden) update();
-                    else goOffline();
-                });
+	                /* When tab becomes visible again, immediately refresh */
+	                document.addEventListener('visibilitychange', () => {
+	                    if (!document.hidden) update();
+	                    else goOffline();
+	                });
+	                window.addEventListener('presence-mode-changed', () => update());
 
                 /* Immediate offline on tab/window close */
                 window.addEventListener('beforeunload', goOffline);

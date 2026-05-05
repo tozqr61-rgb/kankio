@@ -196,6 +196,13 @@ window.chatRoom = function chatRoom() {
                 }
             });
 
+            window.addEventListener('presence-mode-changed', (event) => {
+                this.currentUser.presence_mode = event.detail?.presence_mode || 'online';
+                if (this.currentUser.presence_mode === 'invisible') {
+                    this.sendTyping(false);
+                }
+            });
+
             window.addEventListener('popstate', async () => {
                 const m = window.location.pathname.match(/\/chat\/(\d+)/);
                 if (!m) return;
@@ -588,6 +595,7 @@ window.chatRoom = function chatRoom() {
 
         async sendTyping(isTyping) {
             if (this.roomType === 'announcements') return;
+            if (this.currentUser?.presence_mode === 'invisible' && isTyping) return;
             if (isTyping && !this.inputValue.trim()) isTyping = false;
             if (this._typingSent === isTyping) return;
             this._typingSent = isTyping;
@@ -1255,9 +1263,10 @@ window.chatRoom = function chatRoom() {
         },
 
         /* ══════════ MESSAGE SEEN TRACKING ═══════════ */
-        _startSeenTracking() {
-            this._seenTimer = setInterval(() => {
-                if (isDocumentHidden() || !this.messages.length) return;
+	        _startSeenTracking() {
+	            this._seenTimer = setInterval(() => {
+	                if (this.currentUser?.presence_mode === 'invisible') return;
+	                if (isDocumentHidden() || !this.messages.length) return;
                 const unread = this.messages
                     .filter(m => m.sender?.id !== this.currentUser.id && !m._seen && !m.is_system_message)
                     .map(m => m.id);

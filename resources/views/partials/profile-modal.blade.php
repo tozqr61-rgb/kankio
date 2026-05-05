@@ -105,6 +105,32 @@
                       x-text="notificationsEnabled ? 'AÇIK' : 'KAPALI'"></span>
             </button>
 
+            <!-- Presence Mode Toggle -->
+            <button @click="togglePresenceMode()"
+                class="w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all"
+                style="border-color:rgba(255,255,255,0.08)"
+                onmouseover="this.style.background='rgba(255,255,255,0.04)'" onmouseout="this.style.background=''">
+                <span class="flex items-center gap-2 text-sm text-zinc-300">
+                    <template x-if="presenceMode === 'online'">
+                        <svg class="h-4 w-4" style="color:rgba(52,211,153,1)" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z"/>
+                        </svg>
+                    </template>
+                    <template x-if="presenceMode === 'invisible'">
+                        <svg class="h-4 w-4" style="color:rgba(113,113,122,1)" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 3l18 18M10.477 10.477A2.25 2.25 0 0013.5 13.5m2.121 2.121A9.77 9.77 0 0112 16.5c-4.478 0-8.268-2.943-9.543-7a9.973 9.973 0 012.206-3.592m3.096-1.722A9.764 9.764 0 0112 3.5c4.478 0 8.268 2.943 9.543 7a9.97 9.97 0 01-1.357 2.572"/>
+                        </svg>
+                    </template>
+                    Çevrimdışı Görün
+                </span>
+                <span class="text-xs font-bold" :style="presenceMode === 'invisible' ? 'color:rgba(113,113,122,1)' : 'color:rgba(52,211,153,1)'"
+                      x-text="presenceMode === 'invisible' ? 'AÇIK' : 'KAPALI'"></span>
+            </button>
+
+            <p class="w-full -mt-3 text-xs leading-relaxed text-zinc-500">
+                Açıkken aktif listesinde görünmezsin; yazıyor ve görüldü bilgilerin gönderilmez.
+            </p>
+
             <!-- Upload Button -->
             <button @click="$refs.fileInput.click()" :disabled="uploading"
                 class="w-full py-2.5 rounded-xl border text-sm text-zinc-300 transition-all disabled:opacity-60"
@@ -133,9 +159,10 @@ function profileModal() {
     return {
         open: false,
         uploading: false,
-        avatarPreview: null,
-        notificationsEnabled: {{ auth()->user()->notifications_enabled ? 'true' : 'false' }},
-        currentUser: @json(auth()->user()),
+	        avatarPreview: null,
+	        notificationsEnabled: {{ auth()->user()->notifications_enabled ? 'true' : 'false' }},
+	        presenceMode: @json(auth()->user()->presence_mode ?? 'online'),
+	        currentUser: @json(auth()->user()),
 
         init() {},
 
@@ -161,15 +188,36 @@ function profileModal() {
             finally { this.uploading = false; }
         },
 
-        async toggleNotifications() {
+	        async toggleNotifications() {
             const r = await fetch(`/api/profile/notifications`, {
                 method: 'POST',
                 headers: { 'X-CSRF-TOKEN': CSRF }
             });
             const data = await r.json();
-            this.notificationsEnabled = data.notifications_enabled;
-            showToast(this.notificationsEnabled ? 'Bildirim sesi açıldı' : 'Bildirim sesi kapatıldı');
-        }
-    }
-}
+	            this.notificationsEnabled = data.notifications_enabled;
+	            showToast(this.notificationsEnabled ? 'Bildirim sesi açıldı' : 'Bildirim sesi kapatıldı');
+	        },
+
+	        async togglePresenceMode() {
+	            const nextMode = this.presenceMode === 'invisible' ? 'online' : 'invisible';
+	            const r = await fetch(`/api/profile/presence-mode`, {
+	                method: 'POST',
+	                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
+	                body: JSON.stringify({ presence_mode: nextMode }),
+	            });
+	            const data = await r.json();
+	            if (!r.ok) {
+	                showToast(data.message || 'Durum güncellenemedi', 'error');
+	                return;
+	            }
+	            this.presenceMode = data.presence_mode;
+	            this.currentUser.presence_mode = data.presence_mode;
+	            if (typeof Alpine !== 'undefined' && Alpine.store('chat')) {
+	                Alpine.store('chat').currentUser.presence_mode = data.presence_mode;
+	            }
+	            window.dispatchEvent(new CustomEvent('presence-mode-changed', { detail: { presence_mode: data.presence_mode } }));
+	            showToast(data.presence_mode === 'invisible' ? 'Çevrimdışı görünüyorsun' : 'Çevrimiçi görünüyorsun');
+	        },
+	    }
+	}
 </script>

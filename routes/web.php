@@ -68,6 +68,7 @@ Route::middleware('auth')->group(function () {
     // Profile
     Route::post('/api/profile/avatar', [ProfileController::class, 'uploadAvatar'])->middleware('throttle:10,10')->name('api.profile.avatar');
     Route::post('/api/profile/notifications', [ProfileController::class, 'toggleNotifications'])->name('api.profile.notifications');
+    Route::post('/api/profile/presence-mode', [ProfileController::class, 'updatePresenceMode'])->middleware('throttle:20,1')->name('api.profile.presence_mode');
 
     // Music (slash-command driven)
     Route::get('/api/music/{roomId}', [MusicController::class, 'getState'])->name('api.music.state');

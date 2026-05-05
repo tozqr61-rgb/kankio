@@ -35,6 +35,10 @@ Broadcast::channel('voice.signal.{userId}', function ($user, $userId) {
 
 /* ── Presence: real-time room participant tracking ── */
 Broadcast::channel('presence-room.{roomId}', function ($user, $roomId) {
+    if (($user->presence_mode ?? 'online') === 'invisible') {
+        return false;
+    }
+
     $room = DB::table('rooms')->where('id', $roomId)->first();
     if (! $room) {
         return false;

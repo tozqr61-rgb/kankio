@@ -15,6 +15,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -205,6 +206,56 @@ class ProductionHardeningTest extends TestCase
             ->postJson(route('api.message.seen', $room->id), ['message_ids' => [$message->id]])
             ->assertOk();
         Event::assertDispatched(MessagesRead::class);
+    }
+
+    public function test_invisible_presence_hides_online_typing_and_read_receipts(): void
+    {
+        $sender = User::factory()->create();
+        $reader = User::factory()->create();
+        $room = Room::create(['name' => 'Global', 'type' => 'global', 'created_by' => $sender->id]);
+        $message = Message::create([
+            'room_id' => $room->id,
+            'sender_id' => $sender->id,
+            'content' => 'Read me',
+        ]);
+
+        Cache::put('online_users', [
+            $reader->id => [
+                'id' => $reader->id,
+                'username' => $reader->username,
+                'last_seen' => now()->timestamp,
+            ],
+        ], 300);
+
+        $this->actingAs($reader)
+            ->postJson(route('api.profile.presence_mode'), ['presence_mode' => 'invisible'])
+            ->assertOk()
+            ->assertJsonPath('presence_mode', 'invisible');
+
+        $this->actingAs($reader)
+            ->postJson(route('api.presence.update'), ['status' => 'online'])
+            ->assertOk()
+            ->assertJsonCount(0, 'users');
+
+        $reader = $reader->fresh();
+        Event::fake([UserTyping::class, MessagesRead::class]);
+
+        $this->actingAs($reader)
+            ->postJson(route('api.message.typing', $room->id), ['is_typing' => true])
+            ->assertOk()
+            ->assertJsonPath('presence_mode', 'invisible');
+        Event::assertNotDispatched(UserTyping::class);
+
+        $this->actingAs($reader)
+            ->postJson(route('api.message.seen', $room->id), ['message_ids' => [$message->id]])
+            ->assertOk()
+            ->assertJsonPath('marked', 0);
+        Event::assertNotDispatched(MessagesRead::class);
+
+        $this->assertDatabaseMissing('message_reads', [
+            'message_id' => $message->id,
+            'user_id' => $reader->id,
+        ]);
     }
 
     public function test_should_allow_only_voice_moderators_to_mute_kick_and_change_speak_permission(): void

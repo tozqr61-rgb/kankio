@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 
 class ProfileController extends Controller
@@ -48,5 +49,29 @@ class ProfileController extends Controller
         $user->update(['notifications_enabled' => $enabled]);
 
         return response()->json(['notifications_enabled' => $enabled]);
+    }
+
+    public function updatePresenceMode(Request $request)
+    {
+        $data = $request->validate([
+            'presence_mode' => 'required|in:online,invisible',
+        ]);
+
+        $user = Auth::user();
+        $user->update(['presence_mode' => $data['presence_mode']]);
+
+        if ($data['presence_mode'] === 'invisible') {
+            $onlineUsers = Cache::get('online_users', []);
+            foreach ($onlineUsers as $key => $entry) {
+                if ((int) ($entry['id'] ?? $key) === (int) $user->id) {
+                    unset($onlineUsers[$key]);
+                }
+            }
+            Cache::put('online_users', $onlineUsers, 300);
+        }
+
+        return response()->json([
+            'presence_mode' => $user->fresh()->presence_mode,
+        ]);
     }
 }

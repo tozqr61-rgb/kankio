@@ -206,7 +206,7 @@ class ChatController extends Controller
 
     private function getOnlineUsers(): array
     {
-        return \Cache::get('online_users', []);
+        return $this->visibleOnlineUsers();
     }
 
     private function formatMessage($m): array
@@ -240,12 +240,16 @@ class ChatController extends Controller
         $status = $request->input('status', 'online');
         $onlineUsers = \Cache::get('online_users', []);
 
-        if ($status === 'offline') {
+        if ($status === 'offline' || $this->isInvisible($user)) {
             /* Immediately remove user on explicit offline signal */
-            unset($onlineUsers[$user->id]);
-            \Cache::put('online_users', array_values($onlineUsers), 300);
+            foreach ($onlineUsers as $key => $entry) {
+                if ((int) ($entry['id'] ?? $key) === (int) $user->id) {
+                    unset($onlineUsers[$key]);
+                }
+            }
+            \Cache::put('online_users', $onlineUsers, 300);
 
-            return response()->json(['ok' => true, 'users' => array_values($onlineUsers)]);
+            return response()->json(['ok' => true, 'users' => array_values($this->pruneOnlineUsers($onlineUsers))]);
         }
 
         $onlineUsers[$user->id] = [
@@ -257,13 +261,7 @@ class ChatController extends Controller
             'last_seen' => now()->timestamp,
         ];
 
-        /* Remove users with no heartbeat for > 45 s (heartbeat period is 15 s) */
-        $now = now()->timestamp;
-        foreach ($onlineUsers as $uid => $u) {
-            if (($now - ($u['last_seen'] ?? 0)) >= 45) {
-                unset($onlineUsers[$uid]);
-            }
-        }
+        $onlineUsers = $this->pruneOnlineUsers($onlineUsers);
 
         /* Store with ID keys so we can upsert without duplicates */
         \Cache::put('online_users', $onlineUsers, 300);
@@ -338,6 +336,10 @@ class ChatController extends Controller
             return response()->json(['error' => 'Erişim reddedildi'], 403);
         }
 
+        if ($this->isInvisible($user)) {
+            return response()->json(['ok' => true, 'marked' => 0, 'presence_mode' => 'invisible']);
+        }
+
         $messageIds = $request->input('message_ids', []);
         if (empty($messageIds)) {
             return response()->json(['ok' => true]);
@@ -386,6 +388,10 @@ class ChatController extends Controller
         }
 
         $data = $request->validate(['is_typing' => 'required|boolean']);
+
+        if ($this->isInvisible($user)) {
+            return response()->json(['ok' => true, 'presence_mode' => 'invisible']);
+        }
 
         try {
             broadcast(new UserTyping((int) $roomId, [
@@ -472,14 +478,46 @@ class ChatController extends Controller
 
     public function getPresence()
     {
-        $onlineUsers = \Cache::get('online_users', []);
-
-        /* Remove users inactive > 45 s — same threshold as updatePresence() */
-        $now = now()->timestamp;
-        $onlineUsers = array_filter($onlineUsers, function ($u) use ($now) {
-            return ($now - ($u['last_seen'] ?? 0)) < 45;
-        });
+        $onlineUsers = $this->visibleOnlineUsers();
 
         return response()->json(array_values($onlineUsers));
+    }
+
+    private function isInvisible($user): bool
+    {
+        return \App\Models\User::whereKey($user->id)->value('presence_mode') === 'invisible';
+    }
+
+    private function visibleOnlineUsers(): array
+    {
+        return $this->pruneOnlineUsers(\Cache::get('online_users', []));
+    }
+
+    private function pruneOnlineUsers(array $onlineUsers): array
+    {
+        $now = now()->timestamp;
+        $ids = array_values(array_filter(array_map(
+            fn ($key, $entry) => (int) ($entry['id'] ?? $key),
+            array_keys($onlineUsers),
+            $onlineUsers,
+        )));
+        $invisibleIds = $ids === []
+            ? []
+            : \App\Models\User::whereIn('id', $ids)
+                ->where('presence_mode', 'invisible')
+                ->pluck('id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+
+        foreach ($onlineUsers as $uid => $u) {
+            $userId = (int) ($u['id'] ?? $uid);
+            if (($now - ($u['last_seen'] ?? 0)) >= 45 || in_array($userId, $invisibleIds, true)) {
+                unset($onlineUsers[$uid]);
+            }
+        }
+
+        \Cache::put('online_users', $onlineUsers, 300);
+
+        return $onlineUsers;
     }
 }
