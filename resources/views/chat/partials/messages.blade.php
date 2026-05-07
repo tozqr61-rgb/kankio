@@ -40,7 +40,7 @@
                      :class="voiceState.is_muted ? 'bg-amber-500' : 'bg-emerald-500 animate-pulse'"></div>
             </button>
             <button @click="startIsimSehirGame()"
-                class="hidden md:flex p-2 rounded-lg transition-colors items-center justify-center"
+                class="flex p-2 rounded-lg transition-colors items-center justify-center"
                 style="color:rgba(255,255,255,0.6)"
                 onmouseover="this.style.color='#fff';this.style.background='rgba(255,255,255,0.05)'"
                 onmouseout="this.style.color='rgba(255,255,255,0.6)';this.style.background=''"

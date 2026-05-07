@@ -8,6 +8,7 @@ use App\Http\Controllers\GameController;
 use App\Http\Controllers\MessageController;
 use App\Http\Controllers\MusicController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\PushSubscriptionController;
 use App\Http\Controllers\RoomController;
 use App\Http\Controllers\VoiceController;
 use Illuminate\Support\Facades\Route;
@@ -68,6 +69,10 @@ Route::middleware('auth')->group(function () {
     // Profile
     Route::post('/api/profile/avatar', [ProfileController::class, 'uploadAvatar'])->middleware('throttle:10,10')->name('api.profile.avatar');
     Route::post('/api/profile/notifications', [ProfileController::class, 'toggleNotifications'])->name('api.profile.notifications');
+
+    Route::get('/api/push/public-key', [PushSubscriptionController::class, 'publicKey'])->name('api.push.public_key');
+    Route::post('/api/push/subscribe', [PushSubscriptionController::class, 'store'])->middleware('throttle:10,1')->name('api.push.subscribe');
+    Route::delete('/api/push/subscribe', [PushSubscriptionController::class, 'destroy'])->middleware('throttle:10,1')->name('api.push.unsubscribe');
     Route::post('/api/profile/presence-mode', [ProfileController::class, 'updatePresenceMode'])->middleware('throttle:20,1')->name('api.profile.presence_mode');
 
     // Music (slash-command driven)

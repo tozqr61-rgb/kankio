@@ -231,6 +231,7 @@
     <script>
     const CSRF    = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
     const APP_URL = '{{ rtrim(url('/'), '/') }}';
+    window.KANKIO_VAPID_PUBLIC_KEY = @json(config('services.webpush.public_key'));
 
     /* ── Alpine Store (shared reactive state between components) ── */
     document.addEventListener('alpine:init', () => {
@@ -255,14 +256,15 @@
     /* ── PWA: Service Worker + Install Prompt (skip in Tauri desktop) ── */
     if ('serviceWorker' in navigator && !window.__KANKIO_DESKTOP__) {
         window.addEventListener('load', () => {
-            navigator.serviceWorker.register('/sw.js', {
+            window.KANKIO_SW_REG_PROMISE = navigator.serviceWorker.register('/sw.js', {
                 scope: '/'
             })
             .then(reg => {
                 /* Check for SW updates every 60 min */
                 setInterval(() => reg.update(), 60 * 60 * 1000);
+                return reg;
             })
-            .catch(() => {});
+            .catch(() => null);
         });
     }
 

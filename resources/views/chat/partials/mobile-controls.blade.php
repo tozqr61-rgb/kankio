@@ -120,6 +120,17 @@
                  :class="voiceState.is_muted ? 'bg-amber-400' : 'bg-emerald-500 animate-pulse'"></div>
         </button>
 
+        {{-- Game button --}}
+        <button @click="startIsimSehirGame()"
+                class="flex flex-col items-center justify-center gap-1 flex-1 rounded-xl py-1 relative transition-colors"
+                style="color:rgba(82,82,91,1)">
+            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M14.25 9V6.75A2.25 2.25 0 0012 4.5h-1.5A2.25 2.25 0 008.25 6.75V9m6 0v7.5A2.25 2.25 0 0112 18.75h-1.5A2.25 2.25 0 018.25 16.5V9m6 0h1.5A2.25 2.25 0 0118 11.25v3A2.25 2.25 0 0115.75 16.5h-1.5m-6-7.5h-1.5A2.25 2.25 0 004.5 11.25v3A2.25 2.25 0 006.75 16.5h1.5"/>
+            </svg>
+            <span class="text-[9px] font-medium tracking-wide leading-none">Oyun</span>
+        </button>
+
+
     </div>
 </nav>
 

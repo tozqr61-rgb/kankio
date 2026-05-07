@@ -52,6 +52,7 @@ window.chatRoom = function chatRoom() {
         currentUser: CURRENT_USER,
         isAdmin: IS_ADMIN,
         notifyEnabled: NOTIFICATIONS_ENABLED,
+        browserNotificationPermission: (typeof Notification !== 'undefined' ? Notification.permission : 'default'),
 
         /* Poll state - adaptive */
         _pollTimer: null,
@@ -209,6 +210,7 @@ window.chatRoom = function chatRoom() {
 
             this._schedulePoll(1000);
             this._initEcho();
+            this._initBrowserNotifications();
             this._initYT();
             this._initBackgroundHandlers();
             this._initTauri();
@@ -570,6 +572,96 @@ window.chatRoom = function chatRoom() {
             } catch(e) {}
         },
 
+        async _initBrowserNotifications() {
+            if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
+            if (!this.notifyEnabled) return;
+            await this._syncPushSubscription();
+        },
+
+        async enableBrowserNotifications() {
+            if (!('Notification' in window)) {
+                showToast('Bu cihaz tarayıcı bildirimlerini desteklemiyor', 'error');
+                return;
+            }
+            const permission = await Notification.requestPermission();
+            this.browserNotificationPermission = permission;
+            if (permission !== 'granted') {
+                showToast('Tarayıcı bildirimi izni verilmedi', 'error');
+                return;
+            }
+            await this._syncPushSubscription(true);
+            showToast('Tarayıcı bildirimleri etkinleştirildi');
+        },
+
+        async _syncPushSubscription(forcePrompt = false) {
+            if (!this.notifyEnabled || !('serviceWorker' in navigator) || !('PushManager' in window) || !window.KANKIO_VAPID_PUBLIC_KEY) return;
+            if (Notification.permission === 'denied') {
+                this.browserNotificationPermission = 'denied';
+                return;
+            }
+            if (Notification.permission !== 'granted') {
+                if (!forcePrompt) return;
+                const permission = await Notification.requestPermission();
+                this.browserNotificationPermission = permission;
+                if (permission !== 'granted') return;
+            }
+            const reg = await (window.KANKIO_SW_REG_PROMISE || navigator.serviceWorker.ready);
+            if (!reg) return;
+            let sub = await reg.pushManager.getSubscription();
+            if (!sub) {
+                sub = await reg.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: this._urlBase64ToUint8Array(window.KANKIO_VAPID_PUBLIC_KEY),
+                });
+            }
+            await fetch('/api/push/subscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
+                body: JSON.stringify(sub.toJSON()),
+            });
+        },
+
+        async _unsubscribePush() {
+            if (!('serviceWorker' in navigator)) return;
+            const reg = await (window.KANKIO_SW_REG_PROMISE || navigator.serviceWorker.ready);
+            if (!reg) return;
+            const sub = await reg.pushManager.getSubscription();
+            if (!sub) return;
+            await fetch('/api/push/subscribe', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
+                body: JSON.stringify({ endpoint: sub.endpoint }),
+            }).catch(() => {});
+            await sub.unsubscribe().catch(() => {});
+        },
+
+        _maybeShowBrowserNotification(msg) {
+            if (!this.notifyEnabled || !msg || !msg.sender || String(msg.sender.id) === String(this.currentUser.id)) return;
+            if (document.visibilityState === 'visible') return;
+            const title = msg.sender.username || 'Yeni mesaj';
+            const body = (msg.content || 'Yeni mesaj').slice(0, 160);
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.ready.then(reg => {
+                    reg.showNotification(title, {
+                        body,
+                        icon: '/icons/icon.svg',
+                        badge: '/icons/icon.svg',
+                        tag: `room-${this._roomId}`,
+                        data: { url: `/chat/${this._roomId}` },
+                    });
+                }).catch(() => {});
+            }
+        },
+
+        _urlBase64ToUint8Array(base64String) {
+            const padding = '='.repeat((4 - base64String.length % 4) % 4);
+            const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+            const rawData = window.atob(base64);
+            const outputArray = new Uint8Array(rawData.length);
+            for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+            return outputArray;
+        },
+
         _appendRealtimeMessage(msg) {
             if (!msg || !msg.id) return;
             const exists = this.messages.some(m => String(m.id) === String(msg.id));
@@ -578,6 +670,7 @@ window.chatRoom = function chatRoom() {
             if (!this.lastMessageAt || msg.created_at > this.lastMessageAt) this.lastMessageAt = msg.created_at;
             this._idleCount = 0;
             this._playSound();
+            this._maybeShowBrowserNotification(msg);
             this.$nextTick(() => this.scrollToBottom());
             this._handleBotData(msg.bot_data);
         },

@@ -50,6 +50,12 @@ return [
         'letter_pin' => env('BAGLANTIKAL_LETTER_PIN'),
     ],
 
+    'webpush' => [
+        'public_key' => env('VAPID_PUBLIC_KEY'),
+        'private_key' => env('VAPID_PRIVATE_KEY'),
+        'subject' => env('VAPID_SUBJECT', 'mailto:noreply@kank.com.tr'),
+    ],
+
     'app_release' => [
         'allowed_hosts' => env('APP_RELEASE_ALLOWED_HOSTS', 'drive.google.com,github.com,githubusercontent.com'),
     ],

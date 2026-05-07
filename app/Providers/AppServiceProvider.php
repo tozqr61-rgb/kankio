@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Events\MessageSent;
 use App\Listeners\Bots\DispatchBotMessage;
+use App\Listeners\Notifications\SendWebPushForMessage;
 use App\Services\Bots\BotCommandParser;
 use App\Services\Bots\BotManager;
 use App\Services\Bots\BotMessageService;
@@ -36,6 +37,7 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Event::listen(MessageSent::class, DispatchBotMessage::class);
+        Event::listen(MessageSent::class, SendWebPushForMessage::class);
 
         if (! app()->environment('production')) {
             return;
