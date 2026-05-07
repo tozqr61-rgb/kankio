@@ -11,7 +11,7 @@ use Minishlink\WebPush\WebPush;
 
 class SendWebPushForMessage implements ShouldQueue
 {
-    public string $queue = 'notifications';
+    public string $queue = 'default';
 
     public function handle(MessageSent $event): void
     {
