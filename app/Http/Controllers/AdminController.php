@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Events\MessageSent;
 use App\Models\AdminAction;
 use App\Models\Announcement;
 use App\Models\AppRelease;
@@ -74,6 +73,13 @@ class AdminController extends Controller
     public function banUser(Request $request, $userId)
     {
         $user = User::findOrFail($userId);
+        if ($user->id === auth()->id()) {
+            return response()->json(['error' => 'Kendi hesabını banlayamazsın'], 403);
+        }
+        if (! $user->is_banned && $this->isLastActiveAdmin($user)) {
+            return response()->json(['error' => 'Son admin banlanamaz'], 403);
+        }
+
         $user->update(['is_banned' => ! $user->is_banned]);
         $this->audit->record($request, 'user.ban_toggle', User::class, $user->id, [
             'is_banned' => $user->is_banned,
@@ -93,6 +99,10 @@ class AdminController extends Controller
         ]);
 
         $newRole = $data['role'] ?? ($user->role === 'admin' ? 'user' : 'admin');
+        if ($newRole !== 'admin' && $this->isLastActiveAdmin($user)) {
+            return response()->json(['error' => 'Son admin rolü düşürülemez'], 403);
+        }
+
         $user->update(['role' => $newRole]);
         $this->audit->record($request, 'user.role_toggle', User::class, $user->id, [
             'role' => $newRole,
@@ -123,6 +133,19 @@ class AdminController extends Controller
         ]);
 
         return response()->json(['ok' => true]);
+    }
+
+    private function isLastActiveAdmin(User $user): bool
+    {
+        if (! $user->isAdmin() || $user->is_banned || $user->deactivated_at !== null) {
+            return false;
+        }
+
+        return User::where('role', 'admin')
+            ->where('is_banned', false)
+            ->whereNull('deactivated_at')
+            ->whereKeyNot($user->id)
+            ->doesntExist();
     }
 
     public function deleteRoom(Request $request, $roomId)
@@ -236,35 +259,6 @@ class AdminController extends Controller
             'room_type' => $room->type,
             'reason' => $data['reason'],
         ]);
-
-        $message = Message::create([
-            'room_id' => $room->id,
-            'sender_id' => auth()->id(),
-            'content' => 'Denetim erişimi başlatıldı. Gerekçe: '.$data['reason'],
-            'is_system_message' => true,
-        ]);
-
-        try {
-            broadcast(new MessageSent($room->id, [
-                'id' => $message->id,
-                'title' => null,
-                'content' => $message->content,
-                'audio_url' => null,
-                'audio_duration' => null,
-                'is_system_message' => true,
-                'reply_to' => null,
-                'reply_message' => null,
-                'created_at' => $message->created_at->toISOString(),
-                'sender' => [
-                    'id' => auth()->id(),
-                    'username' => auth()->user()->username,
-                    'avatar_url' => auth()->user()->avatar_url,
-                    'role' => auth()->user()->role,
-                ],
-            ]));
-        } catch (\Throwable) {
-            // Audit record is the source of truth; realtime notice is best effort.
-        }
 
         return response()->json([
             'ok' => true,

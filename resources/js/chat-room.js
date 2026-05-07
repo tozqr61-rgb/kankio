@@ -1280,9 +1280,10 @@ window.chatRoom = function chatRoom() {
 	            this._seenTimer = setInterval(() => {
 	                if (this.currentUser?.presence_mode === 'invisible') return;
 	                if (isDocumentHidden() || !this.messages.length) return;
-                const unread = this.messages
-                    .filter(m => m.sender?.id !== this.currentUser.id && !m._seen && !m.is_system_message)
-                    .map(m => m.id);
+	                const unread = this.messages
+	                    .filter(m => m.sender?.id !== this.currentUser.id && !m._seen && !m.is_system_message)
+	                    .slice(0, 100)
+	                    .map(m => m.id);
                 if (unread.length === 0) return;
 
                 this.messages.forEach(m => { if (unread.includes(m.id)) m._seen = true; });

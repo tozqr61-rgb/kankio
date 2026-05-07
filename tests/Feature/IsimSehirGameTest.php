@@ -8,7 +8,9 @@ use App\Models\GameSession;
 use App\Models\GameSubmission;
 use App\Models\Room;
 use App\Models\User;
+use App\Services\Games\IsimSehirGameService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Mockery;
 use Tests\TestCase;
 
 class IsimSehirGameTest extends TestCase
@@ -65,6 +67,26 @@ class IsimSehirGameTest extends TestCase
             ->assertSee('Cevapları Kilitle', false);
     }
 
+    public function test_start_broadcasts_session_started_only_for_new_session(): void
+    {
+        $user = User::factory()->create();
+        $room = Room::create(['name' => 'Oyun', 'type' => 'global', 'created_by' => $user->id]);
+        $this->partialMock(IsimSehirGameService::class, function ($mock) {
+            $mock->shouldReceive('broadcast')
+                ->once()
+                ->with(Mockery::type(GameSession::class), Mockery::type(User::class), 'session.started');
+        });
+
+        $first = $this->actingAs($user)
+            ->postJson(route('rooms.games.start', $room))
+            ->assertCreated();
+
+        $this->actingAs($user)
+            ->postJson(route('rooms.games.start', $room))
+            ->assertOk()
+            ->assertJsonPath('game_session_id', $first->json('game_session_id'));
+    }
+
     public function test_private_room_outsider_cannot_access_game(): void
     {
         $owner = User::factory()->create();
@@ -97,8 +119,8 @@ class IsimSehirGameTest extends TestCase
             'round_time_seconds' => 60,
             'settings' => ['categories' => ['isim', 'şehir', 'hayvan', 'eşya'], 'round_time_seconds' => 60],
         ]);
-        GameParticipant::create(['game_session_id' => $session->id, 'user_id' => $creator->id, 'joined_at' => now(), 'is_active' => true]);
-        GameParticipant::create(['game_session_id' => $session->id, 'user_id' => $player->id, 'joined_at' => now(), 'is_active' => true]);
+        GameParticipant::create(['game_session_id' => $session->id, 'user_id' => $creator->id, 'joined_at' => now(), 'is_active' => true, 'is_ready' => true]);
+        GameParticipant::create(['game_session_id' => $session->id, 'user_id' => $player->id, 'joined_at' => now(), 'is_active' => true, 'is_ready' => true]);
 
         $this->actingAs($creator)
             ->postJson(route('rooms.games.begin_round', [$room, $session]))
@@ -124,6 +146,147 @@ class IsimSehirGameTest extends TestCase
             'user_id' => $player->id,
             'is_locked' => true,
         ]);
+    }
+
+    public function test_begin_round_requires_at_least_two_active_players(): void
+    {
+        $creator = User::factory()->create();
+        $room = Room::create(['name' => 'Global', 'type' => 'global', 'created_by' => $creator->id]);
+        $session = GameSession::create([
+            'room_id' => $room->id,
+            'created_by' => $creator->id,
+            'game_type' => 'isim_sehir',
+            'status' => 'waiting',
+            'round_time_seconds' => 60,
+            'settings' => ['categories' => ['isim', 'şehir'], 'round_time_seconds' => 60],
+        ]);
+        GameParticipant::create(['game_session_id' => $session->id, 'user_id' => $creator->id, 'joined_at' => now(), 'is_active' => true, 'is_ready' => true]);
+
+        $this->actingAs($creator)
+            ->postJson(route('rooms.games.begin_round', [$room, $session]))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('game');
+
+        $this->assertDatabaseMissing('game_rounds', [
+            'game_session_id' => $session->id,
+        ]);
+    }
+
+    public function test_begin_round_requires_all_active_players_ready(): void
+    {
+        $creator = User::factory()->create();
+        $player = User::factory()->create();
+        $room = Room::create(['name' => 'Global', 'type' => 'global', 'created_by' => $creator->id]);
+        $session = GameSession::create([
+            'room_id' => $room->id,
+            'created_by' => $creator->id,
+            'game_type' => 'isim_sehir',
+            'status' => 'waiting',
+            'round_time_seconds' => 60,
+            'settings' => ['categories' => ['isim', 'şehir'], 'round_time_seconds' => 60],
+        ]);
+        GameParticipant::create(['game_session_id' => $session->id, 'user_id' => $creator->id, 'joined_at' => now(), 'is_active' => true, 'is_ready' => true]);
+        GameParticipant::create(['game_session_id' => $session->id, 'user_id' => $player->id, 'joined_at' => now(), 'is_active' => true, 'is_ready' => false]);
+
+        $this->actingAs($creator)
+            ->postJson(route('rooms.games.begin_round', [$room, $session]))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('game');
+
+        $this->assertDatabaseMissing('game_rounds', [
+            'game_session_id' => $session->id,
+        ]);
+    }
+
+    public function test_begin_round_uses_only_unused_letters_in_session(): void
+    {
+        $creator = User::factory()->create();
+        $player = User::factory()->create();
+        $room = Room::create(['name' => 'Global', 'type' => 'global', 'created_by' => $creator->id]);
+        $session = GameSession::create([
+            'room_id' => $room->id,
+            'created_by' => $creator->id,
+            'game_type' => 'isim_sehir',
+            'status' => 'waiting',
+            'current_round_no' => 21,
+            'round_time_seconds' => 60,
+            'settings' => ['categories' => ['isim', 'şehir'], 'round_time_seconds' => 60],
+        ]);
+        GameParticipant::create(['game_session_id' => $session->id, 'user_id' => $creator->id, 'joined_at' => now(), 'is_active' => true, 'is_ready' => true]);
+        GameParticipant::create(['game_session_id' => $session->id, 'user_id' => $player->id, 'joined_at' => now(), 'is_active' => true, 'is_ready' => true]);
+
+        $usedLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'İ', 'K', 'L', 'M', 'N', 'O', 'P', 'R', 'S', 'T', 'U', 'Y'];
+        foreach ($usedLetters as $index => $letter) {
+            GameRound::create([
+                'game_session_id' => $session->id,
+                'round_no' => $index + 1,
+                'letter' => $letter,
+                'status' => 'closed',
+                'started_at' => now()->subMinutes(30 - $index),
+                'submission_deadline' => now()->subMinutes(20 - $index),
+                'ended_at' => now()->subMinutes(10 - $index),
+                'results_published_at' => now()->subMinutes(10 - $index),
+            ]);
+        }
+
+        $this->actingAs($creator)
+            ->postJson(route('rooms.games.begin_round', [$room, $session]))
+            ->assertOk()
+            ->assertJsonPath('state.round.letter', 'Z')
+            ->assertJsonPath('state.session.current_round_no', 22);
+
+        $this->assertDatabaseHas('game_rounds', [
+            'game_session_id' => $session->id,
+            'round_no' => 22,
+            'letter' => 'Z',
+            'status' => 'collecting',
+        ]);
+    }
+
+    public function test_begin_round_finishes_game_when_letter_pool_is_exhausted(): void
+    {
+        $creator = User::factory()->create();
+        $player = User::factory()->create();
+        $room = Room::create(['name' => 'Global', 'type' => 'global', 'created_by' => $creator->id]);
+        $session = GameSession::create([
+            'room_id' => $room->id,
+            'created_by' => $creator->id,
+            'game_type' => 'isim_sehir',
+            'status' => 'waiting',
+            'current_round_no' => 22,
+            'round_time_seconds' => 60,
+            'settings' => ['categories' => ['isim', 'şehir'], 'round_time_seconds' => 60],
+        ]);
+        GameParticipant::create(['game_session_id' => $session->id, 'user_id' => $creator->id, 'joined_at' => now(), 'is_active' => true, 'is_ready' => true]);
+        GameParticipant::create(['game_session_id' => $session->id, 'user_id' => $player->id, 'joined_at' => now(), 'is_active' => true, 'is_ready' => true]);
+
+        $letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'İ', 'K', 'L', 'M', 'N', 'O', 'P', 'R', 'S', 'T', 'U', 'Y', 'Z'];
+        foreach ($letters as $index => $letter) {
+            GameRound::create([
+                'game_session_id' => $session->id,
+                'round_no' => $index + 1,
+                'letter' => $letter,
+                'status' => 'closed',
+                'started_at' => now()->subMinutes(40 - $index),
+                'submission_deadline' => now()->subMinutes(30 - $index),
+                'ended_at' => now()->subMinutes(20 - $index),
+                'results_published_at' => now()->subMinutes(20 - $index),
+            ]);
+        }
+
+        $this->actingAs($creator)
+            ->postJson(route('rooms.games.begin_round', [$room, $session]))
+            ->assertOk()
+            ->assertJsonPath('round_id', null)
+            ->assertJsonPath('message', 'Harf havuzu bitti. Oyun tamamlandı.')
+            ->assertJsonPath('state.session.status', 'finished')
+            ->assertJsonPath('state.session.current_round_no', 22);
+
+        $this->assertDatabaseHas('game_sessions', [
+            'id' => $session->id,
+            'status' => 'finished',
+        ]);
+        $this->assertSame(22, GameRound::where('game_session_id', $session->id)->count());
     }
 
     public function test_round_finalizes_when_every_active_participant_submits_and_scores_duplicates(): void
@@ -197,6 +360,106 @@ class IsimSehirGameTest extends TestCase
             ->postJson(route('rooms.games.ready', [$room, $session]), ['is_ready' => false])
             ->assertOk()
             ->assertJsonPath('state.participants.0.is_ready', false);
+    }
+
+    public function test_finished_or_cancelled_games_reject_join(): void
+    {
+        $user = User::factory()->create();
+        $room = Room::create(['name' => 'Global', 'type' => 'global', 'created_by' => $user->id]);
+
+        foreach (['finished', 'cancelled'] as $status) {
+            $session = GameSession::create([
+                'room_id' => $room->id,
+                'created_by' => $user->id,
+                'game_type' => 'isim_sehir',
+                'status' => $status,
+                'ended_at' => now(),
+                'round_time_seconds' => 60,
+                'settings' => ['categories' => ['isim', 'şehir'], 'round_time_seconds' => 60],
+            ]);
+
+            $this->actingAs($user)
+                ->postJson(route('rooms.games.join', [$room, $session]))
+                ->assertUnprocessable()
+                ->assertJsonValidationErrors('game');
+
+            $this->assertDatabaseMissing('game_participants', [
+                'game_session_id' => $session->id,
+                'user_id' => $user->id,
+                'is_active' => true,
+            ]);
+        }
+    }
+
+    public function test_game_with_ended_at_rejects_ready_changes(): void
+    {
+        $user = User::factory()->create();
+        $room = Room::create(['name' => 'Global', 'type' => 'global', 'created_by' => $user->id]);
+        $session = GameSession::create([
+            'room_id' => $room->id,
+            'created_by' => $user->id,
+            'game_type' => 'isim_sehir',
+            'status' => 'waiting',
+            'ended_at' => now(),
+            'round_time_seconds' => 60,
+            'settings' => ['categories' => ['isim', 'şehir'], 'round_time_seconds' => 60],
+        ]);
+        GameParticipant::create([
+            'game_session_id' => $session->id,
+            'user_id' => $user->id,
+            'joined_at' => now()->subMinute(),
+            'is_active' => true,
+            'is_ready' => false,
+        ]);
+
+        $this->actingAs($user)
+            ->postJson(route('rooms.games.ready', [$room, $session]), ['is_ready' => true])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('game');
+
+        $this->assertDatabaseHas('game_participants', [
+            'game_session_id' => $session->id,
+            'user_id' => $user->id,
+            'is_ready' => false,
+        ]);
+    }
+
+    public function test_expired_round_rejects_draft_even_before_state_poll_closes_it(): void
+    {
+        $creator = User::factory()->create();
+        $room = Room::create(['name' => 'Global', 'type' => 'global', 'created_by' => $creator->id]);
+        $session = GameSession::create([
+            'room_id' => $room->id,
+            'created_by' => $creator->id,
+            'game_type' => 'isim_sehir',
+            'status' => 'in_progress',
+            'current_round_no' => 1,
+            'round_time_seconds' => 60,
+            'settings' => ['categories' => ['isim'], 'round_time_seconds' => 60],
+        ]);
+        GameParticipant::create(['game_session_id' => $session->id, 'user_id' => $creator->id, 'joined_at' => now(), 'is_active' => true]);
+        $round = GameRound::create([
+            'game_session_id' => $session->id,
+            'round_no' => 1,
+            'letter' => 'M',
+            'status' => 'collecting',
+            'started_at' => now()->subMinutes(2),
+            'submission_deadline' => now()->subSecond(),
+        ]);
+
+        $this->actingAs($creator)
+            ->postJson(route('rooms.games.rounds.draft', [$room, $session, $round]), ['answers' => ['isim' => 'Mert']])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('round');
+
+        $this->assertDatabaseMissing('game_submissions', [
+            'game_round_id' => $round->id,
+            'user_id' => $creator->id,
+        ]);
+        $this->assertDatabaseHas('game_rounds', [
+            'id' => $round->id,
+            'status' => 'closed',
+        ]);
     }
 
     public function test_manager_can_update_game_settings_between_rounds(): void

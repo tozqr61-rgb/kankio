@@ -27,6 +27,10 @@ return Application::configure(basePath: dirname(__DIR__))
             MaintenanceMode::class,
             CheckBanned::class,
         ]);
+        $middleware->appendToGroup('api', [
+            RequestId::class,
+            MaintenanceMode::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

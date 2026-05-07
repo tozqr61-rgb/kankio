@@ -210,6 +210,30 @@ class ProductionHardeningTest extends TestCase
         Event::assertDispatched(MessagesRead::class);
     }
 
+    public function test_mark_seen_validates_message_ids_and_is_throttled(): void
+    {
+        $user = User::factory()->create();
+        $room = Room::create(['name' => 'Global', 'type' => 'global', 'created_by' => $user->id]);
+
+        $this->actingAs($user)
+            ->postJson(route('api.message.seen', $room->id), [])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('message_ids');
+
+        $this->actingAs($user)
+            ->postJson(route('api.message.seen', $room->id), ['message_ids' => ['bad']])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('message_ids.0');
+
+        $this->actingAs($user)
+            ->postJson(route('api.message.seen', $room->id), ['message_ids' => range(1, 101)])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('message_ids');
+
+        $route = app('router')->getRoutes()->getByName('api.message.seen');
+        $this->assertContains('throttle:60,1', $route->gatherMiddleware());
+    }
+
     public function test_invisible_presence_hides_online_typing_and_read_receipts(): void
     {
         $sender = User::factory()->create();
@@ -441,6 +465,36 @@ class ProductionHardeningTest extends TestCase
         $this->assertContains('throttle:5,5', $registerRoute->gatherMiddleware());
     }
 
+    public function test_maintenance_mode_uses_central_whitelist_and_json_response(): void
+    {
+        Cache::forever('maintenance_mode', true);
+        $user = User::factory()->create();
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        $this->get('/')
+            ->assertRedirect('/maintenance');
+
+        $this->get('/maintenance')
+            ->assertOk();
+
+        $this->get('/login')
+            ->assertOk();
+
+        $this->get('/up')
+            ->assertOk();
+
+        $this->actingAs($user)
+            ->getJson(route('api.users'))
+            ->assertStatus(503)
+            ->assertJsonPath('message', 'Bakım modu aktif. Lütfen daha sonra tekrar deneyin.');
+
+        $this->actingAs($admin)
+            ->get(route('admin.dashboard'))
+            ->assertOk();
+
+        Cache::forget('maintenance_mode');
+    }
+
     public function test_should_block_private_room_music_state_for_outsider(): void
     {
         $owner = User::factory()->create();
@@ -466,6 +520,53 @@ class ProductionHardeningTest extends TestCase
             ->assertJsonPath('video_title', 'Private song');
     }
 
+    public function test_music_commands_require_room_moderator_permission_even_when_user_is_in_voice(): void
+    {
+        $owner = User::factory()->create();
+        $member = User::factory()->create();
+        $moderator = User::factory()->create();
+        $room = Room::create(['name' => 'Music Control', 'type' => 'global', 'created_by' => $owner->id]);
+        $room->members()->attach($member->id, ['role' => 'member']);
+        $room->members()->attach($moderator->id, ['role' => 'admin']);
+
+        DB::table('voice_sessions')->insert([
+            ['room_id' => $room->id, 'user_id' => $member->id, 'is_active' => true, 'joined_at' => now(), 'last_ping' => now()],
+            ['room_id' => $room->id, 'user_id' => $moderator->id, 'is_active' => true, 'joined_at' => now(), 'last_ping' => now()],
+        ]);
+        RoomMusicState::create([
+            'room_id' => $room->id,
+            'video_id' => 'dQw4w9WgXcQ',
+            'video_title' => 'Controlled song',
+            'is_playing' => true,
+            'position' => 0,
+            'video_duration' => 120,
+            'started_at_unix' => time(),
+            'queue' => [],
+        ]);
+
+        $this->actingAs($member)
+            ->postJson(route('api.music.command', $room->id), ['command' => '/stop'])
+            ->assertForbidden()
+            ->assertJsonPath('error', 'Müzik kontrol yetkiniz yok');
+
+        $this->assertDatabaseHas('room_music_states', [
+            'room_id' => $room->id,
+            'is_playing' => true,
+            'updated_by' => null,
+        ]);
+
+        $this->actingAs($moderator)
+            ->postJson(route('api.music.command', $room->id), ['command' => '/stop'])
+            ->assertOk()
+            ->assertJsonPath('ok', true);
+
+        $this->assertDatabaseHas('room_music_states', [
+            'room_id' => $room->id,
+            'is_playing' => false,
+            'updated_by' => $moderator->id,
+        ]);
+    }
+
     public function test_should_restrict_global_room_creation_to_admins_but_allow_private_rooms(): void
     {
         $user = User::factory()->create();
@@ -482,6 +583,83 @@ class ProductionHardeningTest extends TestCase
         $this->actingAs($admin)
             ->postJson(route('api.room.store'), ['name' => 'Global ok', 'type' => 'global'])
             ->assertCreated();
+    }
+
+    public function test_user_directory_is_filtered_searchable_paginated_and_throttled(): void
+    {
+        $viewer = User::factory()->create(['username' => 'viewer']);
+        $visibleA = User::factory()->create(['username' => 'ada_alpha']);
+        $visibleB = User::factory()->create(['username' => 'ada_zulu']);
+        User::factory()->create(['username' => 'ada_banned', 'is_banned' => true]);
+        User::factory()->create(['username' => 'ada_bot', 'is_bot' => true]);
+        User::factory()->create(['username' => 'ada_deleted', 'deactivated_at' => now()]);
+
+        $this->actingAs($viewer)
+            ->getJson(route('api.users', ['q' => 'ada', 'per_page' => 1]))
+            ->assertOk()
+            ->assertJsonPath('users.0.id', $visibleA->id)
+            ->assertJsonPath('pagination.has_more', true)
+            ->assertJsonPath('pagination.per_page', 1)
+            ->assertJsonMissing(['username' => 'ada_banned'])
+            ->assertJsonMissing(['username' => 'ada_bot'])
+            ->assertJsonMissing(['username' => 'ada_deleted'])
+            ->assertJsonMissing(['id' => $viewer->id]);
+
+        $this->actingAs($viewer)
+            ->getJson(route('api.users', ['q' => 'ada', 'per_page' => 1, 'page' => 2]))
+            ->assertOk()
+            ->assertJsonPath('users.0.id', $visibleB->id);
+
+        $route = app('router')->getRoutes()->getByName('api.users');
+        $this->assertContains('throttle:30,1', $route->gatherMiddleware());
+    }
+
+    public function test_room_creation_rejects_ineligible_members(): void
+    {
+        $user = User::factory()->create();
+        $eligible = User::factory()->create();
+        $banned = User::factory()->create(['is_banned' => true]);
+
+        $this->actingAs($user)
+            ->postJson(route('api.room.store'), [
+                'name' => 'Private nope',
+                'type' => 'private',
+                'members' => [$eligible->id, $banned->id],
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('members.1');
+    }
+
+    public function test_private_room_creation_persists_room_and_members_together(): void
+    {
+        $owner = User::factory()->create();
+        $member = User::factory()->create();
+
+        $response = $this->actingAs($owner)
+            ->postJson(route('api.room.store'), [
+                'name' => 'Private atomic',
+                'type' => 'private',
+                'members' => [$member->id],
+            ])
+            ->assertCreated();
+
+        $roomId = $response->json('id');
+        $this->assertDatabaseHas('rooms', [
+            'id' => $roomId,
+            'name' => 'Private atomic',
+            'type' => 'private',
+            'created_by' => $owner->id,
+        ]);
+        $this->assertDatabaseHas('room_members', [
+            'room_id' => $roomId,
+            'user_id' => $owner->id,
+            'role' => 'owner',
+        ]);
+        $this->assertDatabaseHas('room_members', [
+            'room_id' => $roomId,
+            'user_id' => $member->id,
+            'role' => 'member',
+        ]);
     }
 
     public function test_should_record_admin_audit_for_destructive_actions(): void
@@ -514,6 +692,71 @@ class ProductionHardeningTest extends TestCase
             'id' => $room->id,
             'is_archived' => true,
             'archived_by' => $admin->id,
+        ]);
+    }
+
+    public function test_admin_cannot_ban_self_or_remove_last_active_admin(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        $this->actingAs($admin)
+            ->postJson(route('admin.ban', $admin->id))
+            ->assertForbidden()
+            ->assertJsonPath('error', 'Kendi hesabını banlayamazsın');
+
+        $this->assertDatabaseHas('users', [
+            'id' => $admin->id,
+            'is_banned' => false,
+            'role' => 'admin',
+        ]);
+        $admin->update(['is_banned' => true]);
+
+        $operator = User::factory()->create(['role' => 'admin']);
+        $lastAdmin = User::factory()->create(['role' => 'admin']);
+        $operator->update(['is_banned' => true]);
+        $controller = app(\App\Http\Controllers\AdminController::class);
+        $request = \Illuminate\Http\Request::create('/admin/users/'.$lastAdmin->id.'/ban', 'POST');
+
+        $this->actingAs($operator);
+
+        $banResponse = $controller->banUser($request, $lastAdmin->id);
+        $this->assertSame(403, $banResponse->getStatusCode());
+        $this->assertSame('Son admin banlanamaz', $banResponse->getData(true)['error']);
+
+        $roleRequest = \Illuminate\Http\Request::create('/admin/users/'.$lastAdmin->id.'/role', 'POST', ['role' => 'user']);
+        $roleResponse = $controller->toggleAdmin($roleRequest, $lastAdmin->id);
+        $this->assertSame(403, $roleResponse->getStatusCode());
+        $this->assertSame('Son admin rolü düşürülemez', $roleResponse->getData(true)['error']);
+
+        $this->assertDatabaseHas('users', [
+            'id' => $lastAdmin->id,
+            'is_banned' => false,
+            'role' => 'admin',
+        ]);
+    }
+
+    public function test_admin_can_ban_or_demote_admin_when_another_active_admin_remains(): void
+    {
+        $operator = User::factory()->create(['role' => 'admin']);
+        $spareAdmin = User::factory()->create(['role' => 'admin']);
+        $target = User::factory()->create(['role' => 'admin']);
+
+        $this->actingAs($operator)
+            ->postJson(route('admin.ban', $target->id))
+            ->assertOk()
+            ->assertJsonPath('is_banned', true);
+
+        $target->update(['is_banned' => false]);
+
+        $this->actingAs($operator)
+            ->postJson(route('admin.toggle.role', $target->id), ['role' => 'user'])
+            ->assertOk()
+            ->assertJsonPath('role', 'user');
+
+        $this->assertDatabaseHas('users', [
+            'id' => $spareAdmin->id,
+            'role' => 'admin',
+            'is_banned' => false,
         ]);
     }
 
@@ -572,7 +815,6 @@ class ProductionHardeningTest extends TestCase
 
         $this->assertFalse(canAccessBroadcastRoom($oversight, $room->id));
 
-        Event::fake([MessageSent::class]);
         $this->actingAs($oversight)
             ->postJson(route('admin.oversight.access'), [
                 'room_id' => $room->id,
@@ -586,8 +828,18 @@ class ProductionHardeningTest extends TestCase
             'action' => 'oversight.room_access',
             'target_id' => (string) $room->id,
         ]);
+        $this->assertDatabaseHas('admin_actions', [
+            'actor_id' => $oversight->id,
+            'action' => 'oversight.room_access',
+            'target_id' => (string) $room->id,
+            'payload->reason' => 'Moderasyon denetim kaydı için erişim.',
+        ]);
+        $this->assertDatabaseMissing('messages', [
+            'room_id' => $room->id,
+            'is_system_message' => true,
+            'content' => 'Denetim erişimi başlatıldı. Gerekçe: Moderasyon denetim kaydı için erişim.',
+        ]);
         $this->assertTrue(canAccessBroadcastRoom($oversight->fresh(), $room->id));
-        Event::assertDispatched(MessageSent::class);
     }
 
     public function test_baglanti_kal_content_is_saved_to_database(): void

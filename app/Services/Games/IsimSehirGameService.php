@@ -22,6 +22,8 @@ class IsimSehirGameService
 
     private const ACTIVE_STATUSES = ['waiting', 'in_progress'];
 
+    private const LETTER_POOL = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'İ', 'K', 'L', 'M', 'N', 'O', 'P', 'R', 'S', 'T', 'U', 'Y', 'Z'];
+
     public function __construct(
         private GameScoringService $scoring,
         private GameStateService $stateService,
@@ -75,6 +77,8 @@ class IsimSehirGameService
 
     public function join(GameSession $session, User $user, bool $broadcast = true): GameParticipant
     {
+        $this->ensureSessionCanAcceptParticipation($session);
+
         $participant = GameParticipant::updateOrCreate(
             ['game_session_id' => $session->id, 'user_id' => $user->id],
             [
@@ -132,6 +136,7 @@ class IsimSehirGameService
 
     public function ready(GameSession $session, User $user, bool $ready): void
     {
+        $this->ensureSessionCanAcceptParticipation($session);
         $this->requireParticipant($session, $user);
         GameParticipant::where('game_session_id', $session->id)
             ->where('user_id', $user->id)
@@ -170,17 +175,15 @@ class IsimSehirGameService
         $this->broadcast($session, $user, 'settings.updated');
     }
 
-    public function beginRound(GameSession $session, User $user): GameRound
+    public function beginRound(GameSession $session, User $user): ?GameRound
     {
-        return DB::transaction(function () use ($session, $user) {
+        $broadcastType = null;
+
+        $round = DB::transaction(function () use ($session, &$broadcastType) {
             $session = GameSession::whereKey($session->id)->lockForUpdate()->firstOrFail();
             if ($session->status === 'finished' || $session->status === 'cancelled') {
                 throw ValidationException::withMessages(['game' => 'Bu oyun bitmiş. Yeni tur başlatılamaz.']);
             }
-            if (! GameParticipant::where('game_session_id', $session->id)->where('is_active', true)->exists()) {
-                throw ValidationException::withMessages(['game' => 'Tur başlatmak için en az bir aktif oyuncu olmalı.']);
-            }
-
             $activeRound = GameRound::where('game_session_id', $session->id)
                 ->where('status', 'collecting')
                 ->first();
@@ -189,11 +192,38 @@ class IsimSehirGameService
                 return $activeRound;
             }
 
+            $activeParticipants = GameParticipant::where('game_session_id', $session->id)
+                ->where('is_active', true);
+            $activeParticipantCount = (clone $activeParticipants)->count();
+            if ($activeParticipantCount < 2) {
+                throw ValidationException::withMessages(['game' => 'Tur başlatmak için en az iki aktif oyuncu olmalı.']);
+            }
+
+            $hasUnreadyParticipant = (clone $activeParticipants)
+                ->where('is_ready', false)
+                ->exists();
+            if ($hasUnreadyParticipant) {
+                throw ValidationException::withMessages(['game' => 'Tur başlatmak için tüm aktif oyuncular hazır olmalı.']);
+            }
+
+            $letter = $this->nextUnusedLetter($session);
+            if (! $letter) {
+                $session->update([
+                    'status' => 'finished',
+                    'ended_at' => $session->ended_at ?: now(),
+                    'last_activity_at' => now(),
+                ]);
+
+                $broadcastType = 'game.finished';
+
+                return null;
+            }
+
             $roundNo = (int) $session->current_round_no + 1;
             $round = GameRound::create([
                 'game_session_id' => $session->id,
                 'round_no' => $roundNo,
-                'letter' => $this->randomLetter(),
+                'letter' => $letter,
                 'status' => 'collecting',
                 'started_at' => now(),
                 'submission_deadline' => now()->addSeconds((int) $session->round_time_seconds),
@@ -207,38 +237,23 @@ class IsimSehirGameService
             ]);
 
             GameParticipant::where('game_session_id', $session->id)->update(['is_ready' => false]);
-            $this->broadcast($session, $user, 'round.started');
+            $broadcastType = 'round.started';
 
             return $round;
         });
+
+        if ($broadcastType) {
+            $this->broadcast($session, $user, $broadcastType);
+        }
+
+        return $round;
     }
 
     public function saveDraft(GameSession $session, GameRound $round, User $user, array $answers): GameSubmission
     {
-        $this->ensureRoundBelongsToSession($session, $round);
-        $this->requireParticipant($session, $user);
+        $expired = false;
 
-        $submission = GameSubmission::firstOrNew([
-            'game_round_id' => $round->id,
-            'user_id' => $user->id,
-        ]);
-
-        if ($round->status !== 'collecting') {
-            throw ValidationException::withMessages(['round' => 'Bu tur kapandı.']);
-        }
-
-        if ($submission->exists && $submission->is_locked) {
-            return $submission;
-        }
-
-        $submission->fill(['answers' => $this->sanitizeAnswers($session, $answers)])->save();
-
-        return $submission;
-    }
-
-    public function submit(GameSession $session, GameRound $round, User $user, array $answers): GameSubmission
-    {
-        $submission = DB::transaction(function () use ($session, $round, $user, $answers) {
+        $submission = DB::transaction(function () use ($session, $round, $user, $answers, &$expired) {
             $this->ensureRoundBelongsToSession($session, $round);
             $this->requireParticipant($session, $user);
             $round = GameRound::whereKey($round->id)->lockForUpdate()->firstOrFail();
@@ -248,8 +263,51 @@ class IsimSehirGameService
             }
 
             if ($round->submission_deadline && now()->greaterThan($round->submission_deadline)) {
-                $this->finalizeRound($session, $round, $user, false);
-                throw ValidationException::withMessages(['round' => 'Süre bitti.']);
+                $this->closeCollectingRound($session, $round);
+                $expired = true;
+
+                return null;
+            }
+
+            $submission = GameSubmission::firstOrNew([
+                'game_round_id' => $round->id,
+                'user_id' => $user->id,
+            ]);
+
+            if ($submission->exists && $submission->is_locked) {
+                return $submission;
+            }
+
+            $submission->fill(['answers' => $this->sanitizeAnswers($session, $answers)])->save();
+
+            return $submission;
+        });
+
+        if ($expired) {
+            throw ValidationException::withMessages(['round' => 'Süre bitti.']);
+        }
+
+        return $submission;
+    }
+
+    public function submit(GameSession $session, GameRound $round, User $user, array $answers): GameSubmission
+    {
+        $expired = false;
+
+        $submission = DB::transaction(function () use ($session, $round, $user, $answers, &$expired) {
+            $this->ensureRoundBelongsToSession($session, $round);
+            $this->requireParticipant($session, $user);
+            $round = GameRound::whereKey($round->id)->lockForUpdate()->firstOrFail();
+
+            if ($round->status !== 'collecting') {
+                throw ValidationException::withMessages(['round' => 'Bu tur kapandı.']);
+            }
+
+            if ($round->submission_deadline && now()->greaterThan($round->submission_deadline)) {
+                $this->closeCollectingRound($session, $round);
+                $expired = true;
+
+                return null;
             }
 
             return GameSubmission::updateOrCreate(
@@ -261,6 +319,10 @@ class IsimSehirGameService
                 ]
             );
         });
+
+        if ($expired) {
+            throw ValidationException::withMessages(['round' => 'Süre bitti.']);
+        }
 
         $this->finalizeIfEveryoneSubmitted($session, $round, $user);
         $this->broadcast($session, $user, 'submission.received');
@@ -276,22 +338,7 @@ class IsimSehirGameService
                 return;
             }
 
-            $categories = $session->settings['categories'] ?? self::DEFAULT_CATEGORIES;
-            $this->scoring->scoreRound($round, $categories);
-
-            foreach ($round->submissions()->where('is_locked', true)->get() as $submission) {
-                GameParticipant::where('game_session_id', $session->id)
-                    ->where('user_id', $submission->user_id)
-                    ->increment('total_score', (int) $submission->score_total);
-            }
-
-            $round->update([
-                'status' => 'closed',
-                'ended_at' => now(),
-                'results_published_at' => now(),
-            ]);
-
-            $session->update(['status' => 'waiting', 'last_activity_at' => now()]);
+            $this->closeCollectingRound($session, $round);
         });
 
         if ($broadcast) {
@@ -384,6 +431,26 @@ class IsimSehirGameService
         }
     }
 
+    private function closeCollectingRound(GameSession $session, GameRound $round): void
+    {
+        $categories = $session->settings['categories'] ?? self::DEFAULT_CATEGORIES;
+        $this->scoring->scoreRound($round, $categories);
+
+        foreach ($round->submissions()->where('is_locked', true)->get() as $submission) {
+            GameParticipant::where('game_session_id', $session->id)
+                ->where('user_id', $submission->user_id)
+                ->increment('total_score', (int) $submission->score_total);
+        }
+
+        $round->update([
+            'status' => 'closed',
+            'ended_at' => now(),
+            'results_published_at' => now(),
+        ]);
+
+        $session->update(['status' => 'waiting', 'last_activity_at' => now()]);
+    }
+
     private function closeExpiredRound(GameSession $session, User $viewer): void
     {
         $round = GameRound::where('game_session_id', $session->id)
@@ -405,6 +472,13 @@ class IsimSehirGameService
 
         if (! $exists) {
             throw ValidationException::withMessages(['participant' => 'Önce oyuna katılmalısınız.']);
+        }
+    }
+
+    private function ensureSessionCanAcceptParticipation(GameSession $session): void
+    {
+        if (in_array($session->status, ['finished', 'cancelled'], true) || $session->ended_at !== null) {
+            throw ValidationException::withMessages(['game' => 'Bitmiş oyuna katılım veya hazır durumu değiştirilemez.']);
         }
     }
 
@@ -461,10 +535,20 @@ class IsimSehirGameService
         ];
     }
 
-    private function randomLetter(): string
+    private function nextUnusedLetter(GameSession $session): ?string
     {
-        $letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'İ', 'K', 'L', 'M', 'N', 'O', 'P', 'R', 'S', 'T', 'U', 'Y', 'Z'];
+        $usedLetters = GameRound::where('game_session_id', $session->id)
+            ->pluck('letter')
+            ->map(fn ($letter) => mb_strtoupper(trim((string) $letter)))
+            ->filter()
+            ->unique()
+            ->all();
 
-        return $letters[array_rand($letters)];
+        $availableLetters = array_values(array_diff(self::LETTER_POOL, $usedLetters));
+        if ($availableLetters === []) {
+            return null;
+        }
+
+        return $availableLetters[array_rand($availableLetters)];
     }
 }

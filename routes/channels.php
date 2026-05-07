@@ -3,7 +3,6 @@
 use App\Models\Room;
 use App\Services\RoomAccessService;
 use Illuminate\Support\Facades\Broadcast;
-use Illuminate\Support\Facades\DB;
 
 if (! function_exists('canAccessBroadcastRoom')) {
     function canAccessBroadcastRoom($user, int $roomId): bool
@@ -59,9 +58,9 @@ Broadcast::channel('room.{roomId}.game', function ($user, $roomId) {
     return canAccessBroadcastRoom($user, (int) $roomId);
 });
 
-/* ── Music control: only room owner or admin can change track ── */
+/* ── Music control: only admins, room owners, or room moderators can change track ── */
 Broadcast::channel('room.{roomId}.music.control', function ($user, $roomId) {
-    $room = DB::table('rooms')->where('id', $roomId)->first();
+    $room = Room::find($roomId);
 
-    return $room && ((int) $room->created_by === (int) $user->id || $user->isAdmin());
+    return $room && app(RoomAccessService::class)->canModerateRoom($room, $user);
 });

@@ -57,6 +57,9 @@
                     <span>Katılımcılar</span>
                     <span style="color:rgba(82,82,91,1)" x-text="selectedUsers.length + ' seçildi'"></span>
                 </label>
+                <input x-model.debounce.300ms="userSearch" @input="fetchUsers(true)" type="search" placeholder="Kullanıcı ara"
+                    class="w-full rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 border outline-none transition-colors"
+                    style="background:rgba(0,0,0,0.25);border-color:rgba(255,255,255,0.08)">
                 <div class="h-48 rounded-xl border overflow-y-auto scrollable"
                      style="background:rgba(0,0,0,0.2);border-color:rgba(255,255,255,0.08)">
                     <div x-show="fetchingUsers" class="flex items-center justify-center h-full">
@@ -87,6 +90,11 @@
                                 </div>
                             </div>
                         </template>
+                        <button x-show="usersHasMore" @click="fetchUsers(false)" type="button"
+                            class="w-full rounded-lg py-2 text-xs font-medium text-zinc-300 hover:text-white"
+                            style="background:rgba(255,255,255,0.04)">
+                            Daha fazla
+                        </button>
                     </div>
                 </div>
             </div>
@@ -109,6 +117,9 @@ function createRoomModal() {
         name: '',
         type: 'global',
         users: [],
+        userSearch: '',
+        usersPage: 1,
+        usersHasMore: false,
         selectedUsers: [],
         loading: false,
         fetchingUsers: false,
@@ -116,12 +127,25 @@ function createRoomModal() {
 
         init() {},
 
-        async fetchUsers() {
-            if (this.users.length > 0) return;
+        async fetchUsers(reset = false) {
+            if (reset) {
+                this.usersPage = 1;
+                this.users = [];
+            }
+            if (this.fetchingUsers) return;
             this.fetchingUsers = true;
             try {
-                const r = await fetch(`/api/users`);
-                this.users = await r.json();
+                const params = new URLSearchParams({
+                    page: String(this.usersPage),
+                    per_page: '20',
+                });
+                if (this.userSearch.trim()) params.set('q', this.userSearch.trim());
+                const r = await fetch(`/api/users?${params.toString()}`, { headers: { 'Accept': 'application/json' } });
+                const data = await r.json();
+                const nextUsers = data.users || [];
+                this.users = reset ? nextUsers : [...this.users, ...nextUsers];
+                this.usersHasMore = !!data.pagination?.has_more;
+                if (this.usersHasMore) this.usersPage = (data.pagination?.current_page || this.usersPage) + 1;
             } catch(e) {}
             this.fetchingUsers = false;
         },

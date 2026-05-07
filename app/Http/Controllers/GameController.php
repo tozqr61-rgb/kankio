@@ -60,7 +60,9 @@ class GameController extends Controller
 
         $hadCurrentSession = (bool) $this->games->current($room);
         $session = $this->games->start($room, $user, $data);
-        $this->games->broadcast($session, $user, 'session.started');
+        if (! $hadCurrentSession) {
+            $this->games->broadcast($session, $user, 'session.started');
+        }
 
         return response()->json([
             'ok' => true,
@@ -151,7 +153,12 @@ class GameController extends Controller
 
         $round = $this->games->beginRound($gameSession, Auth::user());
 
-        return response()->json(['ok' => true, 'round_id' => $round->id, 'state' => $this->games->state($gameSession, Auth::user())]);
+        return response()->json([
+            'ok' => true,
+            'round_id' => $round?->id,
+            'message' => $round ? null : 'Harf havuzu bitti. Oyun tamamlandı.',
+            'state' => $this->games->state($gameSession, Auth::user()),
+        ]);
     }
 
     public function saveDraft(Request $request, Room $room, GameSession $gameSession, GameRound $round)

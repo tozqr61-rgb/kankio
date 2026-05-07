@@ -10,9 +10,19 @@ use Symfony\Component\HttpFoundation\Response;
 
 class MaintenanceMode
 {
+    private const EXCEPT_PATHS = [
+        'up',
+        'login',
+        'maintenance',
+    ];
+
     public function handle(Request $request, Closure $next): Response
     {
         if (! Cache::get('maintenance_mode', false)) {
+            return $next($request);
+        }
+
+        if ($this->isWhitelisted($request)) {
             return $next($request);
         }
 
@@ -21,11 +31,21 @@ class MaintenanceMode
             return $next($request);
         }
 
-        /* Allow login page so admins can authenticate */
-        if ($request->is('login') || $request->is('maintenance')) {
-            return $next($request);
+        if ($request->expectsJson()) {
+            return response()->json(['message' => 'Bakım modu aktif. Lütfen daha sonra tekrar deneyin.'], 503);
         }
 
         return redirect('/maintenance');
+    }
+
+    private function isWhitelisted(Request $request): bool
+    {
+        foreach (self::EXCEPT_PATHS as $path) {
+            if ($request->is($path)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

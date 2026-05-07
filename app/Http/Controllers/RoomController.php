@@ -7,6 +7,8 @@ use App\Models\User;
 use App\Services\RoomAccessService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class RoomController extends Controller
 {
@@ -22,7 +24,13 @@ class RoomController extends Controller
             'name'     => 'required|string|max:100',
             'type'     => 'required|in:global,private',
             'members'  => 'nullable|array',
-            'members.*'=> 'integer|exists:users,id',
+            'members.*'=> [
+                'integer',
+                Rule::exists('users', 'id')->where(fn ($query) => $query
+                    ->where('is_bot', false)
+                    ->where('is_banned', false)
+                    ->whereNull('deactivated_at')),
+            ],
         ]);
 
         $user = Auth::user();
@@ -41,31 +49,39 @@ class RoomController extends Controller
             }
         }
 
-        $room = Room::create([
-            'name'       => $request->name,
-            'type'       => $request->type,
-            'created_by' => $user->id,
-        ]);
+        $room = DB::transaction(function () use ($request, $user) {
+            $room = Room::create([
+                'name'       => $request->name,
+                'type'       => $request->type,
+                'created_by' => $user->id,
+            ]);
 
-        // Add creator as owner
-        $members = [$user->id => ['role' => 'owner']];
+            // Add creator as owner
+            $members = [$user->id => ['role' => 'owner']];
 
-        // Add selected members
-        if ($request->type === 'private' && $request->members) {
-            foreach ($request->members as $memberId) {
-                $members[$memberId] = ['role' => 'member'];
+            // Add selected members
+            if ($request->type === 'private' && $request->members) {
+                foreach ($request->members as $memberId) {
+                    $members[$memberId] = ['role' => 'member'];
+                }
             }
-        }
 
-        // For global rooms, add all users
-        if ($request->type === 'global') {
-            $allUsers = User::where('id', '!=', $user->id)->get();
-            foreach ($allUsers as $u) {
-                $members[$u->id] = ['role' => 'member'];
+            // For global rooms, add all eligible users
+            if ($request->type === 'global') {
+                $allUsers = User::where('id', '!=', $user->id)
+                    ->where('is_bot', false)
+                    ->where('is_banned', false)
+                    ->whereNull('deactivated_at')
+                    ->get();
+                foreach ($allUsers as $u) {
+                    $members[$u->id] = ['role' => 'member'];
+                }
             }
-        }
 
-        $room->members()->attach($members);
+            $room->members()->attach($members);
+
+            return $room;
+        });
 
         return response()->json([
             'id'   => $room->id,
@@ -92,11 +108,38 @@ class RoomController extends Controller
         return response()->json(['ok' => true]);
     }
 
-    public function getUsers()
+    public function getUsers(Request $request)
     {
         $currentUser = Auth::user();
-        $users       = User::where('id', '!=', $currentUser->id)->select('id', 'username', 'avatar_url')->get();
+        $data = $request->validate([
+            'q' => 'nullable|string|max:50',
+            'page' => 'nullable|integer|min:1',
+            'per_page' => 'nullable|integer|min:1|max:50',
+        ]);
+        $perPage = (int) ($data['per_page'] ?? 20);
+        $search = trim((string) ($data['q'] ?? ''));
 
-        return response()->json($users);
+        $users = User::query()
+            ->whereKeyNot($currentUser->id)
+            ->where('is_bot', false)
+            ->where('is_banned', false)
+            ->whereNull('deactivated_at')
+            ->when($search !== '', fn ($query) => $query->where('username', 'like', '%'.$search.'%'))
+            ->orderBy('username')
+            ->paginate($perPage, ['id', 'username', 'avatar_url'], 'page', (int) ($data['page'] ?? 1));
+
+        return response()->json([
+            'users' => collect($users->items())->map(fn (User $user) => [
+                'id' => $user->id,
+                'username' => $user->username,
+                'avatar_url' => $user->avatar_url,
+            ])->values(),
+            'pagination' => [
+                'current_page' => $users->currentPage(),
+                'has_more' => $users->hasMorePages(),
+                'per_page' => $users->perPage(),
+                'total' => $users->total(),
+            ],
+        ]);
     }
 }

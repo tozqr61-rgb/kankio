@@ -24,9 +24,11 @@
 	                    @endif
 	                    <button x-show="!isFinished()" @click="leave()" class="rounded-lg px-4 py-2 text-sm font-medium bg-rose-500/15 text-rose-200 hover:bg-rose-500/25">Ayrıl</button>
 		                </div>
-		            </header>
+			            </header>
 
-	            <section x-show="isFinished()" x-cloak class="rounded-lg border border-emerald-400/20 bg-emerald-400/10 p-4">
+		            <section x-show="refreshWarning" x-cloak class="rounded-lg border border-amber-400/20 bg-amber-400/10 p-3 text-sm text-amber-100" x-text="refreshWarning"></section>
+
+		            <section x-show="isFinished()" x-cloak class="rounded-lg border border-emerald-400/20 bg-emerald-400/10 p-4">
 	                <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
 	                    <div>
 	                        <p class="text-sm font-semibold text-emerald-100" x-text="state.session?.status === 'cancelled' ? 'Oyun iptal edildi' : 'Oyun bitti'"></p>
@@ -131,7 +133,7 @@
 	                        <button @click="submit()" :disabled="!isCollecting() || isLocked() || actionInFlight || isFinished()"
 	                                class="rounded-lg px-5 py-2.5 text-sm font-semibold bg-emerald-400 text-black disabled:opacity-40">Cevapları Kilitle</button>
 	                        @if($canManageGame)
-	                            <button @click="beginRound()" :disabled="actionInFlight || isCollecting() || isFinished()" class="rounded-lg px-5 py-2.5 text-sm font-semibold bg-white/10 hover:bg-white/15 disabled:opacity-40">Yeni Tur Başlat</button>
+		                            <button @click="beginRound()" :disabled="actionInFlight || !canBeginRound()" class="rounded-lg px-5 py-2.5 text-sm font-semibold bg-white/10 hover:bg-white/15 disabled:opacity-40">Yeni Tur Başlat</button>
 	                            <button x-show="isCollecting()" @click="finalizeRound()" :disabled="actionInFlight" class="rounded-lg px-5 py-2.5 text-sm font-semibold bg-amber-500/15 text-amber-200 disabled:opacity-40">Turu Kapat</button>
 	                            <button x-show="!isFinished()" @click="finish()" :disabled="actionInFlight" class="rounded-lg px-5 py-2.5 text-sm font-semibold bg-rose-500/15 text-rose-200 disabled:opacity-40">Oyunu Bitir</button>
 	                        @endif
@@ -264,8 +266,14 @@ function isimSehirGame() {
 	        answerRoundId: null,
 	        remainingLabel: '--',
         tickTimer: null,
-		        pollTimer: null,
-			        draftInFlight: false,
+			        pollTimer: null,
+			        refreshInFlight: false,
+			        refreshFailures: 0,
+			        refreshWarning: '',
+			        nextRefreshDelay: 1500,
+			        realtimeChannelName: null,
+			        beforeUnloadHandler: null,
+				        draftInFlight: false,
 			        draftQueued: false,
 				        actionInFlight: false,
 				        draftStatus: '',
@@ -278,13 +286,15 @@ function isimSehirGame() {
 				        newCategory: '',
 				        settingsDirty: false,
 
-		        init() {
-		            this.hydrateAnswers();
-		            this.resetSettingsForm();
-		            this.startTicker();
-	            this.subscribeRealtime();
-	            this.pollTimer = setInterval(() => this.refresh(), 10000);
-		            gamePost(window.GAME_EVENTS.LOADED, {
+			        init() {
+			            this.hydrateAnswers();
+			            this.resetSettingsForm();
+			            this.startTicker();
+		            this.subscribeRealtime();
+		            this.scheduleRefresh();
+		            this.beforeUnloadHandler = () => this.cleanup();
+		            window.addEventListener('beforeunload', this.beforeUnloadHandler);
+			            gamePost(window.GAME_EVENTS.LOADED, {
 		                roomId: window.ISIM_SEHIR_BOOTSTRAP.roomId,
 		                sessionId: window.ISIM_SEHIR_BOOTSTRAP.sessionId,
 		            });
@@ -296,6 +306,20 @@ function isimSehirGame() {
 	                if (!(category in this.answers)) this.answers[category] = '';
 	            }
 		            this.answerRoundId = this.state.round?.id || null;
+		        },
+
+		        destroy() {
+		            this.cleanup();
+		        },
+
+		        cleanup() {
+		            clearInterval(this.tickTimer);
+		            clearTimeout(this.pollTimer);
+		            this.cleanupRealtime();
+		            if (this.beforeUnloadHandler) {
+		                window.removeEventListener('beforeunload', this.beforeUnloadHandler);
+		                this.beforeUnloadHandler = null;
+		            }
 		        },
 
 		        resetSettingsForm() {
@@ -316,7 +340,7 @@ function isimSehirGame() {
                 }
                 const left = Math.max(0, Math.floor((deadline - Date.now()) / 1000));
                 this.remainingLabel = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
-                if (left === 0) this.refresh();
+	                if (left === 0 && !this.refreshInFlight) this.refresh();
             };
             tick();
             this.tickTimer = setInterval(tick, 1000);
@@ -328,10 +352,17 @@ function isimSehirGame() {
             return 'Tur kapandı, puanlar yayınlandı.';
         },
 
-	        isCollecting() { return this.state.round?.status === 'collecting'; },
-	        isLocked() { return !!this.state.my_submission?.is_locked; },
-	        isFinished() { return this.state.session?.status === 'finished' || this.state.session?.status === 'cancelled'; },
-	        myParticipant() {
+		        isCollecting() { return this.state.round?.status === 'collecting'; },
+		        isLocked() { return !!this.state.my_submission?.is_locked; },
+		        isFinished() { return this.state.session?.status === 'finished' || this.state.session?.status === 'cancelled'; },
+		        activeParticipants() {
+		            return (this.state.participants || []).filter(p => p.is_active);
+		        },
+		        canBeginRound() {
+		            const active = this.activeParticipants();
+		            return !this.isCollecting() && !this.isFinished() && active.length >= 2 && active.every(p => p.is_ready);
+		        },
+		        myParticipant() {
 	            return (this.state.participants || []).find(p => Number(p.user_id) === Number(window.ISIM_SEHIR_BOOTSTRAP.currentUserId));
 	        },
 
@@ -381,11 +412,65 @@ function isimSehirGame() {
 		            }
 		        },
 
+        refreshDelay() {
+            return this.isCollecting() ? 10000 : 1500;
+        },
+
+        scheduleRefresh(delay = null) {
+            clearTimeout(this.pollTimer);
+            this.pollTimer = setTimeout(() => this.refresh(), delay ?? this.nextRefreshDelay ?? this.refreshDelay());
+        },
+
+        handleRefreshRedirect(status) {
+            const fallback = `/rooms/${window.ISIM_SEHIR_BOOTSTRAP.roomId}`;
+            if (status === 401) {
+                showToast('Oturum süresi doldu. Giriş sayfasına yönlendiriliyorsun.', 'error');
+                setTimeout(() => { window.location.href = '/login'; }, 1200);
+                return true;
+            }
+            if (status === 403 || status === 404) {
+                showToast(status === 403 ? 'Bu oyuna erişim iznin yok.' : 'Oyun bulunamadı.', 'error');
+                setTimeout(() => { window.location.href = fallback; }, 1200);
+                return true;
+            }
+            return false;
+        },
+
         refresh() {
+            if (this.refreshInFlight) return Promise.resolve();
+            this.refreshInFlight = true;
+
             return fetch(`/rooms/${window.ISIM_SEHIR_BOOTSTRAP.roomId}/games/${window.ISIM_SEHIR_BOOTSTRAP.sessionId}/state`, { headers: { 'Accept': 'application/json' } })
-                .then(r => r.json())
-                .then(state => this.applyState(state))
-                .catch(() => {});
+                .then(async r => {
+                    const data = await r.json().catch(() => ({}));
+                    if (!r.ok) {
+                        const error = new Error(data.message || Object.values(data.errors || {})?.[0]?.[0] || 'Oyun durumu güncellenemedi');
+                        error.status = r.status;
+                        error.errors = data.errors || {};
+                        throw error;
+                    }
+                    this.refreshFailures = 0;
+                    this.refreshWarning = '';
+                    this.applyState(data);
+                    this.nextRefreshDelay = this.refreshDelay();
+                })
+                .catch(error => {
+                    if (this.handleRefreshRedirect(error.status)) return;
+
+                    this.refreshFailures += 1;
+                    this.nextRefreshDelay = Math.min(60000, 5000 * (2 ** Math.min(this.refreshFailures, 3)));
+                    this.refreshWarning = `Oyun durumu güncellenemedi. ${Math.round(this.nextRefreshDelay / 1000)} sn içinde tekrar denenecek.`;
+
+                    if (error.status === 422) {
+                        showToast(error.message || 'Oyun durumu güncellenemedi', 'error');
+                    } else if (this.refreshFailures === 1 || this.refreshFailures % 3 === 0) {
+                        showToast('Bağlantı sorunu nedeniyle oyun durumu yenilenemedi', 'error');
+                    }
+                })
+                .finally(() => {
+                    this.refreshInFlight = false;
+                    if (!this.isFinished()) this.scheduleRefresh();
+                });
         },
 
 	        join() { return this.guardedRequest(`/rooms/${window.ISIM_SEHIR_BOOTSTRAP.roomId}/games/${window.ISIM_SEHIR_BOOTSTRAP.sessionId}/join`).catch(e => showToast(e.message, 'error')); },
@@ -514,10 +599,11 @@ function isimSehirGame() {
 	                .catch(e => showToast(e.message, 'error'));
 	        },
 
-        subscribeRealtime() {
-            if (!window.KANKIO_ECHO && window.LaravelEcho && window.Pusher) {
-                const cfg = window.ISIM_SEHIR_BOOTSTRAP.broadcastConfig;
-                const driver = window.ISIM_SEHIR_BOOTSTRAP.broadcastDriver;
+	        subscribeRealtime() {
+	            if (this.realtimeChannelName) return;
+	            if (!window.KANKIO_ECHO && window.LaravelEcho && window.Pusher) {
+	                const cfg = window.ISIM_SEHIR_BOOTSTRAP.broadcastConfig;
+	                const driver = window.ISIM_SEHIR_BOOTSTRAP.broadcastDriver;
                 const c = driver === 'pusher' ? (cfg.pusher || {}) : (cfg.reverb || {});
                 window.KANKIO_ECHO = new window.LaravelEcho({
                     broadcaster: driver === 'pusher' ? 'pusher' : 'reverb',
@@ -530,19 +616,26 @@ function isimSehirGame() {
                     enabledTransports: ['ws', 'wss'],
                     authEndpoint: '/broadcasting/auth',
                     auth: { headers: { 'X-CSRF-TOKEN': window.ISIM_SEHIR_BOOTSTRAP.csrf } },
-                });
-            }
-            if (window.KANKIO_ECHO) {
-                window.KANKIO_ECHO.private(`room.${window.ISIM_SEHIR_BOOTSTRAP.roomId}.game`)
-                    .listen('.game.session', (payload) => {
-                        if (Number(payload.game_session_id) === Number(window.ISIM_SEHIR_BOOTSTRAP.sessionId)) {
-                            this.applyState(payload.state);
-                        }
-                    });
-            }
-        },
-    };
-}
+	                });
+	            }
+	            if (window.KANKIO_ECHO) {
+	                this.realtimeChannelName = `room.${window.ISIM_SEHIR_BOOTSTRAP.roomId}.game`;
+	                window.KANKIO_ECHO.private(this.realtimeChannelName)
+	                    .listen('.game.session', (payload) => {
+	                        if (Number(payload.game_session_id) === Number(window.ISIM_SEHIR_BOOTSTRAP.sessionId)) {
+	                            this.refresh();
+	                        }
+	                    });
+	            }
+	        },
+
+	        cleanupRealtime() {
+	            if (!this.realtimeChannelName || !window.KANKIO_ECHO) return;
+	            window.KANKIO_ECHO.leave(this.realtimeChannelName);
+	            this.realtimeChannelName = null;
+	        },
+	    };
+	}
 window.__kankioLoadAlpine?.();
 </script>
 @endpush

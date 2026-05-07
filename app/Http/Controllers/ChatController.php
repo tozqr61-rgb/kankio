@@ -19,6 +19,8 @@ class ChatController extends Controller
 
     private const PRESENCE_TTL_SECONDS = 90;
 
+    private const MAX_SEEN_MESSAGE_IDS = 100;
+
     public function __construct(private RoomAccessService $roomAccess)
     {
     }
@@ -326,6 +328,10 @@ class ChatController extends Controller
 
     public function markSeen(Request $request, $roomId)
     {
+        $data = $request->validate([
+            'message_ids' => 'required|array|max:'.self::MAX_SEEN_MESSAGE_IDS,
+            'message_ids.*' => 'integer',
+        ]);
         $user = Auth::user();
         $room = Room::findOrFail($roomId);
 
@@ -337,8 +343,8 @@ class ChatController extends Controller
             return response()->json(['ok' => true, 'marked' => 0, 'presence_mode' => 'invisible']);
         }
 
-        $messageIds = $request->input('message_ids', []);
-        if (empty($messageIds)) {
+        $messageIds = array_values(array_unique($data['message_ids']));
+        if ($messageIds === []) {
             return response()->json(['ok' => true]);
         }
 

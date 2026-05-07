@@ -23,9 +23,7 @@ class MusicController extends Controller
 
     private const DJ_BOT_USERNAME = '🎵 DJ Bot';
 
-    public function __construct(private RoomAccessService $roomAccess)
-    {
-    }
+    public function __construct(private RoomAccessService $roomAccess) {}
 
     /** Return current music state (with live-computed position).
      *  Also auto-advances track if it has ended. */
@@ -74,6 +72,10 @@ class MusicController extends Controller
 
         if (! $this->roomAccess->canAccessRoom($room, $user)) {
             return response()->json(['error' => 'Erişim reddedildi'], 403);
+        }
+
+        if (! $this->roomAccess->canModerateRoom($room, $user)) {
+            return response()->json(['error' => 'Müzik kontrol yetkiniz yok'], 403);
         }
 
         /* Check user is in voice chat */

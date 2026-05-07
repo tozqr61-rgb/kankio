@@ -46,7 +46,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/api/chat/{roomId}/bootstrap', [ChatController::class, 'bootstrap'])->name('api.chat.bootstrap');
     Route::post('/api/chat/{roomId}/messages', [MessageController::class, 'store'])->middleware('throttle:30,1')->name('api.message.store');
     Route::delete('/api/chat/{roomId}/messages/{messageId}', [MessageController::class, 'destroy'])->middleware('throttle:20,1')->name('api.message.destroy');
-    Route::post('/api/chat/{roomId}/seen', [ChatController::class, 'markSeen'])->name('api.message.seen');
+    Route::post('/api/chat/{roomId}/seen', [ChatController::class, 'markSeen'])->middleware('throttle:60,1')->name('api.message.seen');
     Route::post('/api/chat/{roomId}/typing', [ChatController::class, 'typing'])->middleware('throttle:120,1')->name('api.message.typing');
     Route::get('/api/chat/{roomId}/archived', [ChatController::class, 'archivedMessages'])->name('api.message.archived');
     Route::post('/api/chat/{roomId}/stay-connected', [ChatController::class, 'triggerStayConnected'])->name('api.stay.trigger');
@@ -56,7 +56,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/api/rooms', [RoomController::class, 'store'])->middleware('throttle:10,10')->name('api.room.store');
     Route::delete('/api/rooms/{roomId}', [RoomController::class, 'destroy'])->name('api.room.destroy');
     Route::get('/api/rooms/{roomId}/frame', [ChatController::class, 'roomFrame'])->name('api.room.frame');
-    Route::get('/api/users', [RoomController::class, 'getUsers'])->name('api.users');
+    Route::get('/api/users', [RoomController::class, 'getUsers'])->middleware('throttle:30,1')->name('api.users');
 
     // Presence
     Route::post('/api/presence', [ChatController::class, 'updatePresence'])->middleware('throttle:120,1')->name('api.presence.update');
